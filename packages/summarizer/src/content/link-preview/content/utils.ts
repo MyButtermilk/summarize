@@ -6,6 +6,7 @@ import {
   type ExtractedLinkContent,
   type FetchLinkContentOptions,
   type FinalizationArguments,
+  type FirecrawlMode,
   type TranscriptResolution,
 } from './types.js'
 
@@ -29,6 +30,14 @@ export function resolveTimeoutMs(options?: FetchLinkContentOptions): number {
     return DEFAULT_TIMEOUT_MS
   }
   return Math.floor(candidate)
+}
+
+export function resolveFirecrawlMode(options?: FetchLinkContentOptions): FirecrawlMode {
+  const candidate = options?.firecrawl
+  if (candidate === 'off' || candidate === 'auto' || candidate === 'always') {
+    return candidate
+  }
+  return 'auto'
 }
 
 export function appendNote(existing: string | null | undefined, next: string): string {

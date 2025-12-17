@@ -15,12 +15,22 @@ export interface YoutubeTranscriptConfig {
   apiKey: string
   context: Record<string, unknown>
   params: string
+  visitorData?: string | null
+  clientName?: string | null
+  clientVersion?: string | null
+  pageCl?: number | null
+  pageLabel?: string | null
 }
 
 type YoutubeBootstrapConfig = Record<string, unknown> & {
   INNERTUBE_API_KEY?: unknown
   INNERTUBE_CONTEXT?: unknown
   INNERTUBE_CLIENT_VERSION?: unknown
+  INNERTUBE_CONTEXT_CLIENT_NAME?: unknown
+  INNERTUBE_CONTEXT_CLIENT_VERSION?: unknown
+  VISITOR_DATA?: unknown
+  PAGE_CL?: unknown
+  PAGE_BUILD_LABEL?: unknown
 }
 
 type TranscriptRunRecord = Record<string, unknown> & { text?: unknown }
@@ -53,10 +63,37 @@ export const extractYoutubeiTranscriptConfig = (html: string): YoutubeTranscript
       return null
     }
 
+    const visitorDataCandidate = typedBootstrap.VISITOR_DATA
+    const visitorDataFromBootstrap =
+      typeof visitorDataCandidate === 'string' ? visitorDataCandidate : null
+    const contextClientCandidate = (context as Record<string, unknown>).client
+    const contextClient = isRecord(contextClientCandidate) ? contextClientCandidate : null
+    const visitorDataFromContext =
+      typeof contextClient?.visitorData === 'string' ? (contextClient.visitorData as string) : null
+    const visitorData = visitorDataFromBootstrap ?? visitorDataFromContext
+    const clientNameCandidate = typedBootstrap.INNERTUBE_CONTEXT_CLIENT_NAME
+    const clientName =
+      typeof clientNameCandidate === 'number'
+        ? String(clientNameCandidate)
+        : typeof clientNameCandidate === 'string'
+          ? clientNameCandidate
+          : null
+    const clientVersionCandidate = typedBootstrap.INNERTUBE_CONTEXT_CLIENT_VERSION
+    const clientVersion = typeof clientVersionCandidate === 'string' ? clientVersionCandidate : null
+    const pageClCandidate = typedBootstrap.PAGE_CL
+    const pageCl = typeof pageClCandidate === 'number' ? pageClCandidate : null
+    const pageLabelCandidate = typedBootstrap.PAGE_BUILD_LABEL
+    const pageLabel = typeof pageLabelCandidate === 'string' ? pageLabelCandidate : null
+
     return {
       apiKey,
       context,
       params: parameters,
+      visitorData,
+      clientName,
+      clientVersion,
+      pageCl,
+      pageLabel,
     }
   } catch {
     return null
@@ -94,15 +131,38 @@ export const fetchTranscriptFromTranscriptEndpoint = async (
     const userAgent =
       REQUEST_HEADERS['User-Agent'] ??
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'User-Agent': userAgent,
+      Accept: 'application/json',
+      Origin: 'https://www.youtube.com',
+      Referer: originalUrl,
+      'X-Goog-AuthUser': '0',
+      'X-Youtube-Bootstrap-Logged-In': 'false',
+    }
+
+    if (config.clientName) {
+      headers['X-Youtube-Client-Name'] = config.clientName
+    }
+    if (config.clientVersion) {
+      headers['X-Youtube-Client-Version'] = config.clientVersion
+    }
+    if (config.visitorData) {
+      headers['X-Goog-Visitor-Id'] = config.visitorData
+    }
+    if (typeof config.pageCl === 'number' && Number.isFinite(config.pageCl)) {
+      headers['X-Youtube-Page-CL'] = String(config.pageCl)
+    }
+    if (config.pageLabel) {
+      headers['X-Youtube-Page-Label'] = config.pageLabel
+    }
+
     const response = await fetchWithTimeout(
       fetchImpl,
       `https://www.youtube.com/youtubei/v1/get_transcript?key=${config.apiKey}`,
       {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': userAgent,
-        },
+        headers,
         body: JSON.stringify(payload),
       }
     )
@@ -228,6 +288,11 @@ export const extractYoutubeiBootstrap = (
   apiKey: string | null
   context: Record<string, unknown>
   clientVersion: string | null
+  clientName: string | null
+  visitorData: string | null
+  pageCl: number | null
+  pageLabel: string | null
+  xsrfToken: string | null
 } | null => {
   try {
     const bootstrapConfig = extractYoutubeBootstrapConfig(html)
@@ -241,6 +306,23 @@ export const extractYoutubeiBootstrap = (
     const context = isRecord(contextCandidate) ? contextCandidate : null
     const clientVersionCandidate = typedBootstrap.INNERTUBE_CLIENT_VERSION
     const clientVersion = typeof clientVersionCandidate === 'string' ? clientVersionCandidate : null
+    const clientNameCandidate = typedBootstrap.INNERTUBE_CONTEXT_CLIENT_NAME
+    const clientName =
+      typeof clientNameCandidate === 'number'
+        ? String(clientNameCandidate)
+        : typeof clientNameCandidate === 'string'
+          ? clientNameCandidate
+          : null
+    const contextClientCandidate = (context as Record<string, unknown>).client
+    const contextClient = isRecord(contextClientCandidate) ? contextClientCandidate : null
+    const visitorDataCandidate = contextClient?.visitorData
+    const visitorData = typeof visitorDataCandidate === 'string' ? visitorDataCandidate : null
+    const pageClCandidate = typedBootstrap.PAGE_CL
+    const pageCl = typeof pageClCandidate === 'number' ? pageClCandidate : null
+    const pageLabelCandidate = typedBootstrap.PAGE_BUILD_LABEL
+    const pageLabel = typeof pageLabelCandidate === 'string' ? pageLabelCandidate : null
+    const xsrfCandidate = (bootstrapConfig as Record<string, unknown>).XSRF_TOKEN
+    const xsrfToken = typeof xsrfCandidate === 'string' ? xsrfCandidate : null
     if (!context) {
       return null
     }
@@ -248,6 +330,11 @@ export const extractYoutubeiBootstrap = (
       apiKey,
       context,
       clientVersion,
+      clientName,
+      visitorData,
+      pageCl,
+      pageLabel,
+      xsrfToken,
     }
   } catch {
     return null

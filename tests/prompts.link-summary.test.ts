@@ -36,7 +36,7 @@ describe('buildLinkSummaryPrompt', () => {
       shares: [],
     })
 
-    expect(prompt).toContain('Hard limit: 20,000 characters total')
+    expect(prompt).toContain('Target length: around 20,000 characters total')
   })
 
   it('renders sharer lines with metrics and timestamp', () => {

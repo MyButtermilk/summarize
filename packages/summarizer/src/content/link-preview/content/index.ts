@@ -13,6 +13,7 @@ import {
   ensureTranscriptDiagnostics,
   finalizeExtractedLinkContent,
   pickFirstText,
+  resolveFirecrawlMode,
   resolveMaxCharacters,
   resolveTimeoutMs,
   safeHostname,
@@ -61,6 +62,60 @@ export async function fetchLinkContent(
   const maxCharacters = resolveMaxCharacters(options)
   const timeoutMs = resolveTimeoutMs(options)
   const youtubeTranscriptMode = options?.youtubeTranscript ?? 'auto'
+  const firecrawlMode = resolveFirecrawlMode(options)
+
+  const canUseFirecrawl =
+    firecrawlMode !== 'off' && deps.scrapeWithFirecrawl !== null && !isYouTubeUrl(url)
+
+  let firecrawlAttempted = false
+  let firecrawlPayload: FirecrawlScrapeResult | null = null
+  const firecrawlDiagnostics: FirecrawlDiagnostics = { attempted: false, used: false, notes: null }
+
+  const attemptFirecrawl = async (reason: string): Promise<ExtractedLinkContent | null> => {
+    if (!canUseFirecrawl) {
+      return null
+    }
+
+    if (!firecrawlAttempted) {
+      const attempt = await fetchWithFirecrawl(url, deps.scrapeWithFirecrawl, { timeoutMs })
+      firecrawlAttempted = true
+      firecrawlPayload = attempt.payload
+      firecrawlDiagnostics.attempted = attempt.diagnostics.attempted
+      firecrawlDiagnostics.used = attempt.diagnostics.used
+      firecrawlDiagnostics.notes = attempt.diagnostics.notes ?? null
+    }
+
+    firecrawlDiagnostics.notes = appendNote(firecrawlDiagnostics.notes, reason)
+
+    if (!firecrawlPayload) {
+      return null
+    }
+
+    const firecrawlResult = await buildResultFromFirecrawl({
+      url,
+      payload: firecrawlPayload,
+      maxCharacters,
+      youtubeTranscriptMode,
+      firecrawlDiagnostics,
+      deps,
+    })
+    if (firecrawlResult) {
+      return firecrawlResult
+    }
+
+    firecrawlDiagnostics.notes = appendNote(
+      firecrawlDiagnostics.notes,
+      'Firecrawl returned empty content'
+    )
+    return null
+  }
+
+  if (firecrawlMode === 'always') {
+    const firecrawlResult = await attemptFirecrawl('Firecrawl forced via options')
+    if (firecrawlResult) {
+      return firecrawlResult
+    }
+  }
 
   let html: string | null = null
   let htmlError: unknown = null
@@ -71,51 +126,19 @@ export async function fetchLinkContent(
     htmlError = error
   }
 
-  const shouldTryFirecrawl =
-    deps.scrapeWithFirecrawl !== null &&
-    !isYouTubeUrl(url) &&
-    (html === null || shouldFallbackToFirecrawl(html))
-
-  if (shouldTryFirecrawl) {
-    const firecrawlAttempt = await fetchWithFirecrawl(url, deps.scrapeWithFirecrawl, { timeoutMs })
-    firecrawlAttempt.diagnostics.notes = appendNote(
-      firecrawlAttempt.diagnostics.notes,
-      html === null
-        ? 'HTML fetch failed; falling back to Firecrawl'
-        : 'HTML content looked blocked/thin; falling back to Firecrawl'
-    )
-
-    if (firecrawlAttempt.payload) {
-      const firecrawlResult = await buildResultFromFirecrawl({
-        url,
-        payload: firecrawlAttempt.payload,
-        maxCharacters,
-        youtubeTranscriptMode,
-        firecrawlDiagnostics: firecrawlAttempt.diagnostics,
-        deps,
-      })
-      if (firecrawlResult) {
-        return firecrawlResult
-      }
-      firecrawlAttempt.diagnostics.notes = appendNote(
-        firecrawlAttempt.diagnostics.notes,
-        'Firecrawl returned empty content'
-      )
+  if (!html) {
+    if (!canUseFirecrawl) {
+      throw htmlError instanceof Error ? htmlError : new Error('Failed to fetch HTML document')
     }
 
-    if (html) {
-      return buildResultFromHtmlDocument({
-        url,
-        html,
-        maxCharacters,
-        youtubeTranscriptMode,
-        firecrawlDiagnostics: firecrawlAttempt.diagnostics,
-        deps,
-      })
+    const firecrawlResult = await attemptFirecrawl('HTML fetch failed; falling back to Firecrawl')
+    if (firecrawlResult) {
+      return firecrawlResult
     }
 
-    const notes = firecrawlAttempt.diagnostics.notes
-    const firecrawlError = notes ? `; Firecrawl notes: ${notes}` : ''
+    const firecrawlError = firecrawlDiagnostics.notes
+      ? `; Firecrawl notes: ${firecrawlDiagnostics.notes}`
+      : ''
     throw new Error(
       `Failed to fetch HTML document${firecrawlError}${
         htmlError instanceof Error ? `; HTML error: ${htmlError.message}` : ''
@@ -123,11 +146,15 @@ export async function fetchLinkContent(
     )
   }
 
-  if (!html) {
-    throw htmlError instanceof Error ? htmlError : new Error('Failed to fetch HTML document')
+  if (firecrawlMode === 'auto' && shouldFallbackToFirecrawl(html)) {
+    const firecrawlResult = await attemptFirecrawl(
+      'HTML content looked blocked/thin; falling back to Firecrawl'
+    )
+    if (firecrawlResult) {
+      return firecrawlResult
+    }
   }
 
-  const firecrawlDiagnostics: FirecrawlDiagnostics = { attempted: false, used: false, notes: null }
   return buildResultFromHtmlDocument({
     url,
     html,

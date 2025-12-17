@@ -127,7 +127,7 @@ export function buildLinkSummaryPrompt({
   const maxCharactersLine =
     typeof summaryLength === 'string'
       ? ''
-      : `Hard limit: ${formatCount(summaryLength.maxCharacters)} characters total (including Markdown and whitespace).`
+      : `Target length: around ${formatCount(summaryLength.maxCharacters)} characters total (including Markdown and whitespace). This is a soft guideline; prioritize clarity and completeness.`
 
   const shareLines = shares.map((share) => {
     const handle = share.handle && share.handle.length > 0 ? `@${share.handle}` : share.author

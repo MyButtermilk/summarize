@@ -13,12 +13,14 @@ This repo is a **pnpm workspace** with two publishable packages:
 - **YouTube transcripts** (when the URL is a YouTube link):
   - `youtubei` transcript endpoint (best-effort)
   - `captionTracks` (best-effort)
+  - `yt-dlp` fallback (optional; requires `yt-dlp` installed locally)
   - Apify transcript actor (optional fallback, requires `APIFY_API_TOKEN`)
   - If transcripts are blocked, we still extract `ytInitialPlayerResponse.videoDetails.shortDescription` so YouTube links summarize meaningfully.
 - **Firecrawl fallback for blocked sites**: if direct HTML fetching is blocked or yields too little content, we retry via Firecrawl to get Markdown (requires `FIRECRAWL_API_KEY`).
 - **Prompt-only mode**: print the generated prompt and use any model/provider you want.
 - **OpenAI mode**: if `OPENAI_API_KEY` is set, calls the Chat Completions API and prints the model output.
 - **Structured output**: `--json` emits a single JSON object with extraction diagnostics + the prompt + (optional) summary.
+ - **Extract-only mode**: `--extract-only` prints the extracted content (no OpenAI call).
 
 ## CLI usage
 
@@ -66,11 +68,16 @@ pnpm summarize -- "https://example.com" --json
   - `auto` (default): try YouTube web endpoints first (`youtubei` / `captionTracks`), then fall back to Apify
   - `web`: only try YouTube web endpoints (no Apify)
   - `apify`: only try Apify (no web endpoints)
+- `--firecrawl off|auto|always`
+  - `off`: never use Firecrawl
+  - `auto` (default): use Firecrawl only as a fallback when HTML fetch/extraction looks blocked or too thin
+  - `always`: try Firecrawl first (still falls back to HTML when Firecrawl is unavailable/empty)
 - `--length short|medium|long|xl|xxl|<chars>`
-  - Presets influence formatting; `<chars>` (e.g. `20k`, `1500`) adds a hard character limit instruction and clamps output to the budget.
+  - Presets influence formatting; `<chars>` (e.g. `20k`, `1500`) adds a soft “target length” instruction (no hard truncation).
 - `--timeout <duration>`: `30` (seconds), `30s`, `2m`, `5000ms`
 - `--model <model>`: default `gpt-5.2` (or `OPENAI_MODEL`)
 - `--prompt`: print prompt and exit (never calls OpenAI)
+- `--extract-only`: print extracted content and exit (never calls OpenAI)
 - `--json`: emit a single JSON object instead of plain text
 
 ## Required services & API keys

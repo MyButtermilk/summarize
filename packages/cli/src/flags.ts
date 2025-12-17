@@ -1,6 +1,7 @@
 import type { SummaryLength } from '@steipete/summarizer/prompts'
 
 export type YoutubeMode = 'auto' | 'web' | 'apify'
+export type FirecrawlMode = 'off' | 'auto' | 'always'
 
 export type LengthArg =
   | { kind: 'preset'; preset: SummaryLength }
@@ -15,6 +16,12 @@ export function parseYoutubeMode(raw: string): YoutubeMode {
   if (normalized === 'autp') return 'auto'
   if (normalized === 'auto' || normalized === 'web' || normalized === 'apify') return normalized
   throw new Error(`Unsupported --youtube: ${raw}`)
+}
+
+export function parseFirecrawlMode(raw: string): FirecrawlMode {
+  const normalized = raw.trim().toLowerCase()
+  if (normalized === 'off' || normalized === 'auto' || normalized === 'always') return normalized
+  throw new Error(`Unsupported --firecrawl: ${raw}`)
 }
 
 export function parseDurationMs(raw: string): number {
@@ -53,10 +60,4 @@ export function parseLengthArg(raw: string): LengthArg {
   const unit = match.groups.unit?.toLowerCase() ?? null
   const multiplier = unit === 'k' ? 1000 : unit === 'm' ? 1_000_000 : 1
   return { kind: 'chars', maxCharacters: Math.floor(numeric * multiplier) }
-}
-
-export function truncateToCharacters(text: string, maxCharacters: number): string {
-  if (text.length <= maxCharacters) return text
-  if (maxCharacters <= 1) return '…'
-  return `${text.slice(0, maxCharacters - 1).trimEnd()}…`
 }

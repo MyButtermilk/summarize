@@ -1,6 +1,7 @@
 export type TranscriptSource =
   | 'youtubei'
   | 'captionTracks'
+  | 'yt-dlp'
   | 'apify'
   | 'html'
   | 'unavailable'

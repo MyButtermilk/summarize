@@ -6,7 +6,7 @@ import {
 } from '@steipete/summarizer/prompts'
 import { Command } from 'commander'
 import { createFirecrawlScraper } from './firecrawl.js'
-import { parseDurationMs, parseLengthArg, parseYoutubeMode, truncateToCharacters } from './flags.js'
+import { parseDurationMs, parseFirecrawlMode, parseLengthArg, parseYoutubeMode } from './flags.js'
 
 type RunEnv = {
   env: Record<string, string | undefined>
@@ -20,6 +20,7 @@ type JsonOutput = {
     url: string
     timeoutMs: number
     youtube: string
+    firecrawl: string
     length: { kind: 'preset'; preset: string } | { kind: 'chars'; maxCharacters: number }
   }
   env: {
@@ -46,6 +47,11 @@ function buildProgram() {
       'auto'
     )
     .option(
+      '--firecrawl <mode>',
+      'Firecrawl usage: off, auto (fallback), always (try Firecrawl first)',
+      'auto'
+    )
+    .option(
       '--length <length>',
       'Summary length: short|medium|long|xl|xxl or a character limit like 20000, 20k',
       'medium'
@@ -57,6 +63,7 @@ function buildProgram() {
     )
     .option('--model <model>', 'OpenAI model', undefined)
     .option('--prompt', 'Print the prompt and exit', false)
+    .option('--extract-only', 'Print extracted content and exit', false)
     .option('--json', 'Output structured JSON', false)
     .allowExcessArguments(false)
 }
@@ -155,7 +162,13 @@ export async function runCli(
   const lengthArg = parseLengthArg(program.opts().length as string)
   const timeoutMs = parseDurationMs(program.opts().timeout as string)
   const printPrompt = Boolean(program.opts().prompt)
+  const extractOnly = Boolean(program.opts().extractOnly)
   const json = Boolean(program.opts().json)
+  const firecrawlMode = parseFirecrawlMode(program.opts().firecrawl as string)
+
+  if (printPrompt && extractOnly) {
+    throw new Error('--prompt and --extract-only are mutually exclusive')
+  }
 
   const model =
     (typeof program.opts().model === 'string' ? (program.opts().model as string) : null) ??
@@ -166,9 +179,15 @@ export async function runCli(
   const apifyToken = typeof env.APIFY_API_TOKEN === 'string' ? env.APIFY_API_TOKEN : null
   const firecrawlKey = typeof env.FIRECRAWL_API_KEY === 'string' ? env.FIRECRAWL_API_KEY : null
 
+  const firecrawlApiKey = firecrawlKey && firecrawlKey.trim().length > 0 ? firecrawlKey : null
+  const firecrawlConfigured = firecrawlApiKey !== null
+  if (firecrawlMode === 'always' && !firecrawlConfigured) {
+    throw new Error('--firecrawl always requires FIRECRAWL_API_KEY')
+  }
+
   const scrapeWithFirecrawl =
-    firecrawlKey && firecrawlKey.trim().length > 0
-      ? createFirecrawlScraper({ apiKey: firecrawlKey, fetchImpl: fetch })
+    firecrawlConfigured && firecrawlMode !== 'off'
+      ? createFirecrawlScraper({ apiKey: firecrawlApiKey, fetchImpl: fetch })
       : null
 
   const client = createLinkPreviewClient({
@@ -180,6 +199,7 @@ export async function runCli(
   const extracted = await client.fetchLinkContent(url, {
     timeoutMs,
     youtubeTranscript: youtubeMode,
+    firecrawl: firecrawlMode,
   })
 
   const isYouTube = extracted.siteName === 'YouTube'
@@ -198,6 +218,37 @@ export async function runCli(
     shares: [],
   })
 
+  if (extractOnly) {
+    if (json) {
+      const payload: JsonOutput = {
+        input: {
+          url,
+          timeoutMs,
+          youtube: youtubeMode,
+          firecrawl: firecrawlMode,
+          length:
+            lengthArg.kind === 'preset'
+              ? { kind: 'preset', preset: lengthArg.preset }
+              : { kind: 'chars', maxCharacters: lengthArg.maxCharacters },
+        },
+        env: {
+          hasOpenAIKey: Boolean(apiKey),
+          hasApifyToken: Boolean(apifyToken),
+          hasFirecrawlKey: firecrawlConfigured,
+        },
+        extracted,
+        prompt,
+        openai: null,
+        summary: null,
+      }
+      stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
+      return
+    }
+
+    stdout.write(`${extracted.content}\n`)
+    return
+  }
+
   if (printPrompt || !apiKey) {
     if (!apiKey && !json) {
       stderr.write('Missing OPENAI_API_KEY; printing prompt instead.\n')
@@ -209,6 +260,7 @@ export async function runCli(
           url,
           timeoutMs,
           youtube: youtubeMode,
+          firecrawl: firecrawlMode,
           length:
             lengthArg.kind === 'preset'
               ? { kind: 'preset', preset: lengthArg.preset }
@@ -217,7 +269,7 @@ export async function runCli(
         env: {
           hasOpenAIKey: Boolean(apiKey),
           hasApifyToken: Boolean(apifyToken),
-          hasFirecrawlKey: Boolean(firecrawlKey),
+          hasFirecrawlKey: firecrawlConfigured,
         },
         extracted,
         prompt,
@@ -247,9 +299,6 @@ export async function runCli(
   })
 
   summary = summary.trim()
-  if (lengthArg.kind === 'chars') {
-    summary = truncateToCharacters(summary, lengthArg.maxCharacters)
-  }
 
   if (json) {
     const payload: JsonOutput = {
@@ -257,6 +306,7 @@ export async function runCli(
         url,
         timeoutMs,
         youtube: youtubeMode,
+        firecrawl: firecrawlMode,
         length:
           lengthArg.kind === 'preset'
             ? { kind: 'preset', preset: lengthArg.preset }
@@ -265,7 +315,7 @@ export async function runCli(
       env: {
         hasOpenAIKey: true,
         hasApifyToken: Boolean(apifyToken),
-        hasFirecrawlKey: Boolean(firecrawlKey),
+        hasFirecrawlKey: firecrawlConfigured,
       },
       extracted,
       prompt,

@@ -8,6 +8,90 @@ interface YoutubeTranscriptContext {
   videoId: string
 }
 
+const REQUEST_HEADERS: Record<string, string> = {
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+  'Accept-Language': 'en-US,en;q=0.9',
+}
+
+const YT_INITIAL_PLAYER_RESPONSE_TOKEN = 'ytInitialPlayerResponse'
+
+function extractBalancedJsonObject(source: string, startAt: number): string | null {
+  const start = source.indexOf('{', startAt)
+  if (start < 0) {
+    return null
+  }
+
+  let depth = 0
+  let inString = false
+  let quote: '"' | "'" | null = null
+  let escaping = false
+
+  for (let i = start; i < source.length; i += 1) {
+    const ch = source[i]
+    if (!ch) {
+      continue
+    }
+
+    if (inString) {
+      if (escaping) {
+        escaping = false
+        continue
+      }
+      if (ch === '\\') {
+        escaping = true
+        continue
+      }
+      if (quote && ch === quote) {
+        inString = false
+        quote = null
+      }
+      continue
+    }
+
+    if (ch === '"' || ch === "'") {
+      inString = true
+      quote = ch
+      continue
+    }
+
+    if (ch === '{') {
+      depth += 1
+      continue
+    }
+    if (ch === '}') {
+      depth -= 1
+      if (depth === 0) {
+        return source.slice(start, i + 1)
+      }
+    }
+  }
+
+  return null
+}
+
+function extractInitialPlayerResponse(html: string): Record<string, unknown> | null {
+  const tokenIndex = html.indexOf(YT_INITIAL_PLAYER_RESPONSE_TOKEN)
+  if (tokenIndex < 0) {
+    return null
+  }
+  const assignmentIndex = html.indexOf('=', tokenIndex)
+  if (assignmentIndex < 0) {
+    return null
+  }
+  const objectText = extractBalancedJsonObject(html, assignmentIndex)
+  if (!objectText) {
+    return null
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(objectText)
+    return isObjectLike(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
 const isObjectLike = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null
 
@@ -32,12 +116,21 @@ export const fetchTranscriptFromCaptionTracks = async (
   fetchImpl: typeof fetch,
   { html, originalUrl, videoId }: YoutubeTranscriptContext
 ): Promise<string | null> => {
+  const initialPlayerResponse = extractInitialPlayerResponse(html)
+  if (initialPlayerResponse) {
+    const transcript = await extractTranscriptFromPlayerPayload(fetchImpl, initialPlayerResponse)
+    if (transcript) {
+      return transcript
+    }
+  }
+
   const bootstrap = extractYoutubeiBootstrap(html)
   if (!bootstrap) {
     return null
   }
 
-  const { apiKey, context } = bootstrap
+  const { apiKey, clientName, clientVersion, context, pageCl, pageLabel, visitorData, xsrfToken } =
+    bootstrap
   if (!apiKey) {
     return null
   }
@@ -65,14 +158,44 @@ export const fetchTranscriptFromCaptionTracks = async (
   }
 
   try {
+    const userAgent =
+      REQUEST_HEADERS['User-Agent'] ??
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'User-Agent': userAgent,
+      Accept: 'application/json',
+      Origin: 'https://www.youtube.com',
+      Referer: originalUrl,
+      'X-Goog-AuthUser': '0',
+      'X-Youtube-Bootstrap-Logged-In': 'false',
+    }
+
+    if (clientName) {
+      headers['X-Youtube-Client-Name'] = clientName
+    }
+    if (clientVersion) {
+      headers['X-Youtube-Client-Version'] = clientVersion
+    }
+    if (visitorData) {
+      headers['X-Goog-Visitor-Id'] = visitorData
+    }
+    if (typeof pageCl === 'number' && Number.isFinite(pageCl)) {
+      headers['X-Youtube-Page-CL'] = String(pageCl)
+    }
+    if (pageLabel) {
+      headers['X-Youtube-Page-Label'] = pageLabel
+    }
+    if (xsrfToken) {
+      headers['X-Youtube-Identity-Token'] = xsrfToken
+    }
+
     const response = await fetchWithTimeout(
       fetchImpl,
       `https://www.youtube.com/youtubei/v1/player?key=${apiKey}`,
       {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers,
         body: JSON.stringify(requestBody),
       }
     )
@@ -207,7 +330,9 @@ const downloadCaptionTrack = async (
   })()
 
   try {
-    const response = await fetchWithTimeout(fetchImpl, transcriptUrl)
+    const response = await fetchWithTimeout(fetchImpl, transcriptUrl, {
+      headers: REQUEST_HEADERS,
+    })
     if (!response.ok) {
       return null
     }
