@@ -96,7 +96,7 @@ async function summarizeWithOpenAI({
     body: JSON.stringify({
       model,
       temperature: 0.2,
-      max_tokens: maxOutputTokens,
+      max_completion_tokens: maxOutputTokens,
       messages: [{ role: 'user', content: prompt }],
     }),
   })
