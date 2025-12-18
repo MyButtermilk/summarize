@@ -204,7 +204,7 @@ function assertProviderSupportsAttachment({
   // xAI via AI SDK currently supports image parts, but not generic file parts (e.g. PDFs).
   if (provider === 'xai' && attachment.part.type === 'file') {
     throw new Error(
-      `Model ${modelId} does not support attaching files of type ${attachment.mediaType}. Try a different --model (e.g. google/gemini-2.0-flash).`
+      `Model ${modelId} does not support attaching files of type ${attachment.mediaType}. Try a different --model (e.g. google/gemini-3-flash-preview).`
     )
   }
 }
@@ -782,7 +782,7 @@ export async function runCli(
       } catch (error) {
         if (isUnsupportedAttachmentError(error)) {
           throw new Error(
-            `Model ${parsedModel.canonical} does not support attaching files of type ${attachment.mediaType}. Try a different --model (e.g. google/gemini-2.0-flash).`,
+            `Model ${parsedModel.canonical} does not support attaching files of type ${attachment.mediaType}. Try a different --model (e.g. google/gemini-3-flash-preview).`,
             { cause: error }
           )
         }
@@ -825,7 +825,7 @@ export async function runCli(
         } catch (error) {
           if (isUnsupportedAttachmentError(error)) {
             throw new Error(
-              `Model ${parsedModel.canonical} does not support attaching files of type ${attachment.mediaType}. Try a different --model (e.g. google/gemini-2.0-flash).`,
+              `Model ${parsedModel.canonical} does not support attaching files of type ${attachment.mediaType}. Try a different --model (e.g. google/gemini-3-flash-preview).`,
               { cause: error }
             )
           }
@@ -871,7 +871,7 @@ export async function runCli(
       } catch (error) {
         if (isUnsupportedAttachmentError(error)) {
           throw new Error(
-            `Model ${parsedModel.canonical} does not support attaching files of type ${attachment.mediaType}. Try a different --model (e.g. google/gemini-2.0-flash).`,
+            `Model ${parsedModel.canonical} does not support attaching files of type ${attachment.mediaType}. Try a different --model (e.g. google/gemini-3-flash-preview).`,
             { cause: error }
           )
         }
