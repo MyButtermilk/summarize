@@ -1,6 +1,14 @@
 import { Command, CommanderError } from 'commander'
 import { createLiveRenderer, render as renderMarkdownAnsi } from 'markdansi'
+import type { ModelMessage } from 'ai'
 import { loadSummarizeConfig } from './config.js'
+import {
+  buildAssetPromptMessages,
+  classifyUrl,
+  loadLocalAsset,
+  loadRemoteAsset,
+  resolveInputTarget,
+} from './content/asset.js'
 import { createLinkPreviewClient } from './content/index.js'
 import type { LlmCall } from './costs.js'
 import { buildRunCostReport } from './costs.js'
@@ -19,6 +27,7 @@ import { createHtmlToMarkdownConverter } from './llm/html-to-markdown.js'
 import { normalizeGatewayStyleModelId, parseGatewayStyleModelId } from './llm/model-id.js'
 import { loadLiteLlmCatalog, resolveLiteLlmPricingForModelId } from './pricing/litellm.js'
 import {
+  buildFileSummaryPrompt,
   buildLinkSummaryPrompt,
   estimateMaxCompletionTokensForCharacters,
   SUMMARY_LENGTH_TO_TOKENS,
@@ -34,15 +43,27 @@ type RunEnv = {
 }
 
 type JsonOutput = {
-  input: {
-    url: string
+  input: ({
     timeoutMs: number
-    youtube: string
-    firecrawl: string
-    markdown: string
     length: { kind: 'preset'; preset: string } | { kind: 'chars'; maxCharacters: number }
     model: string
-  }
+  } & (
+    | {
+        kind: 'url'
+        url: string
+        youtube: string
+        firecrawl: string
+        markdown: string
+      }
+    | {
+        kind: 'file'
+        filePath: string
+      }
+    | {
+        kind: 'asset-url'
+        url: string
+      }
+  ))
   env: {
     hasXaiKey: boolean
     hasOpenAIKey: boolean
@@ -71,7 +92,7 @@ function buildProgram() {
   return new Command()
     .name('summarize')
     .description('Summarize web pages and YouTube links (uses direct provider API keys).')
-    .argument('[url]', 'URL to summarize')
+    .argument('[input]', 'URL or local file path to summarize')
     .option(
       '--youtube <mode>',
       'YouTube transcript source: auto (web then apify), web (youtubei/captionTracks), apify',
@@ -202,7 +223,7 @@ async function summarizeWithModelId({
   apiKeys,
 }: {
   modelId: string
-  prompt: string
+  prompt: string | ModelMessage[]
   maxOutputTokens: number
   timeoutMs: number
   fetchImpl: typeof fetch
@@ -414,26 +435,15 @@ export async function runCli(
     throw error
   }
 
-  const rawUrl = program.args[0]
-  if (!rawUrl) {
+  const rawInput = program.args[0]
+  if (!rawInput) {
     throw new Error(
-      'Usage: summarize <url> [--youtube auto|web|apify] [--length 20k] [--timeout 2m] [--json]'
+      'Usage: summarize <url-or-file> [--youtube auto|web|apify] [--length 20k] [--timeout 2m] [--json]'
     )
   }
 
-  const url = (() => {
-    const normalized = rawUrl.trim()
-    let parsed: URL
-    try {
-      parsed = new URL(normalized)
-    } catch {
-      throw new Error(`Invalid URL: ${rawUrl}`)
-    }
-    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      throw new Error('Only HTTP and HTTPS URLs can be summarized')
-    }
-    return normalized
-  })()
+  const inputTarget = resolveInputTarget(rawInput)
+  const url = inputTarget.kind === 'url' ? inputTarget.url : null
 
   const runStartedAtMs = Date.now()
 
@@ -449,7 +459,7 @@ export async function runCli(
   const markdownMode = parseMarkdownMode(program.opts().markdown as string)
   const raw = Boolean(program.opts().raw)
 
-  const isYoutubeUrl = /youtube\.com|youtu\.be/i.test(url)
+  const isYoutubeUrl = typeof url === 'string' ? /youtube\.com|youtu\.be/i.test(url) : false
   const firecrawlExplicitlySet = normalizedArgv.some(
     (arg) => arg === '--firecrawl' || arg.startsWith('--firecrawl=')
   )
@@ -579,6 +589,333 @@ export async function runCli(
     stderr.write(`cost total estimated=${fmtUsd(report.totalEstimatedUsd)}\n`)
   }
 
+  if (extractOnly && inputTarget.kind !== 'url') {
+    throw new Error('--extract-only is only supported for website/YouTube URLs')
+  }
+
+  const progressEnabled = isRichTty(stderr) && !verbose && !json
+
+  const summarizeAsset = async ({
+    sourceKind,
+    sourceLabel,
+    attachment,
+  }: {
+    sourceKind: 'file' | 'asset-url'
+    sourceLabel: string
+    attachment: Awaited<ReturnType<typeof loadLocalAsset>>['attachment']
+  }) => {
+    const parsedModel = parseGatewayStyleModelId(model)
+    const apiKeysForLlm = {
+      xaiApiKey,
+      openaiApiKey: apiKey,
+      googleApiKey: googleConfigured ? googleApiKey : null,
+      anthropicApiKey: anthropicConfigured ? anthropicApiKey : null,
+    }
+
+    const requiredKeyEnv =
+      parsedModel.provider === 'xai'
+        ? 'XAI_API_KEY'
+        : parsedModel.provider === 'google'
+          ? 'GOOGLE_GENERATIVE_AI_API_KEY'
+          : parsedModel.provider === 'anthropic'
+            ? 'ANTHROPIC_API_KEY'
+            : 'OPENAI_API_KEY'
+    const hasRequiredKey =
+      parsedModel.provider === 'xai'
+        ? Boolean(xaiApiKey)
+        : parsedModel.provider === 'google'
+          ? googleConfigured
+          : parsedModel.provider === 'anthropic'
+            ? anthropicConfigured
+            : Boolean(apiKey)
+    if (!hasRequiredKey) {
+      throw new Error(
+        `Missing ${requiredKeyEnv} for model ${parsedModel.canonical}. Set the env var or choose a different --model.`
+      )
+    }
+
+    const summaryLengthTarget =
+      lengthArg.kind === 'preset'
+        ? lengthArg.preset
+        : { maxCharacters: lengthArg.maxCharacters }
+
+    const { prompt: promptText, maxOutputTokens } = buildFileSummaryPrompt({
+      filename: attachment.filename,
+      mediaType: attachment.mediaType,
+      summaryLength: summaryLengthTarget,
+    })
+
+    const messages = buildAssetPromptMessages({ promptText, attachment })
+
+    const shouldBufferSummaryForRender =
+      streamingEnabled && effectiveRenderMode === 'md' && isRichTty(stdout)
+    const shouldLiveRenderSummary =
+      streamingEnabled && effectiveRenderMode === 'md-live' && isRichTty(stdout)
+    const shouldStreamSummaryToStdout =
+      streamingEnabled && !shouldBufferSummaryForRender && !shouldLiveRenderSummary
+
+    let summaryAlreadyPrinted = false
+    let summary: string
+
+    if (streamingEnabled) {
+      const streamResult = await streamTextWithModelId({
+        modelId: parsedModel.canonical,
+        apiKeys: apiKeysForLlm,
+        prompt: messages,
+        temperature: 0,
+        maxOutputTokens,
+        timeoutMs,
+        fetchImpl: trackedFetch,
+      })
+
+      let streamed = ''
+      const liveRenderer = shouldLiveRenderSummary
+        ? createLiveRenderer({
+            write: (chunk) => stdout.write(chunk),
+            width: terminalWidth(stdout, env),
+            renderFrame: (markdown) =>
+              renderMarkdownAnsi(markdown, {
+                width: terminalWidth(stdout, env),
+                wrap: true,
+                color: supportsColor(stdout, env),
+              }),
+          })
+        : null
+      let lastFrameAtMs = 0
+      try {
+        for await (const delta of streamResult.textStream) {
+          streamed += delta
+          if (shouldStreamSummaryToStdout) {
+            stdout.write(delta)
+            continue
+          }
+
+          if (liveRenderer) {
+            const now = Date.now()
+            const due = now - lastFrameAtMs >= 120
+            const hasNewline = delta.includes('\n')
+            if (hasNewline || due) {
+              liveRenderer.render(streamed)
+              lastFrameAtMs = now
+            }
+          }
+        }
+
+        const trimmed = streamed.trim()
+        streamed = trimmed
+        if (liveRenderer) {
+          liveRenderer.render(trimmed)
+          summaryAlreadyPrinted = true
+        }
+      } finally {
+        liveRenderer?.finish()
+      }
+
+      const usage = await streamResult.usage
+      llmCalls.push({
+        provider: streamResult.provider,
+        model: streamResult.canonicalModelId,
+        usage,
+        purpose: 'summary',
+      })
+      summary = streamed
+
+      if (shouldStreamSummaryToStdout) {
+        if (!streamed.endsWith('\n')) {
+          stdout.write('\n')
+        }
+        summaryAlreadyPrinted = true
+      }
+    } else {
+      const result = await summarizeWithModelId({
+        modelId: parsedModel.canonical,
+        prompt: messages,
+        maxOutputTokens,
+        timeoutMs,
+        fetchImpl: trackedFetch,
+        apiKeys: apiKeysForLlm,
+      })
+      llmCalls.push({
+        provider: result.provider,
+        model: result.canonicalModelId,
+        usage: result.usage,
+        purpose: 'summary',
+      })
+      summary = result.text
+    }
+
+    summary = summary.trim()
+    if (summary.length === 0) {
+      throw new Error('LLM returned an empty summary')
+    }
+
+    const extracted = {
+      kind: 'asset' as const,
+      source: sourceLabel,
+      mediaType: attachment.mediaType,
+      filename: attachment.filename,
+    }
+
+	    if (json) {
+	      const finishReport = await buildReport()
+	      const costReport = cost || verbose ? finishReport : null
+	      const input: JsonOutput['input'] =
+	        sourceKind === 'file'
+	          ? {
+	              kind: 'file',
+	              filePath: sourceLabel,
+	              timeoutMs,
+	              length:
+	                lengthArg.kind === 'preset'
+	                  ? { kind: 'preset', preset: lengthArg.preset }
+	                  : { kind: 'chars', maxCharacters: lengthArg.maxCharacters },
+	              model,
+	            }
+	          : {
+	              kind: 'asset-url',
+	              url: sourceLabel,
+	              timeoutMs,
+	              length:
+	                lengthArg.kind === 'preset'
+	                  ? { kind: 'preset', preset: lengthArg.preset }
+	                  : { kind: 'chars', maxCharacters: lengthArg.maxCharacters },
+	              model,
+	            }
+	      const payload: JsonOutput = {
+	        input,
+	        env: {
+	          hasXaiKey: Boolean(xaiApiKey),
+	          hasOpenAIKey: Boolean(apiKey),
+	          hasApifyToken: Boolean(apifyToken),
+          hasFirecrawlKey: firecrawlConfigured,
+          hasGoogleKey: googleConfigured,
+          hasAnthropicKey: anthropicConfigured,
+        },
+        extracted,
+        prompt: promptText,
+        llm: {
+          provider: parsedModel.provider,
+          model: parsedModel.canonical,
+          maxCompletionTokens: maxOutputTokens,
+          strategy: 'single',
+          chunkCount: 1,
+        },
+        cost: costReport,
+        summary,
+      }
+
+      if (costReport) {
+        writeCostReport(costReport)
+      }
+      stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
+      writeFinishLine({
+        stderr,
+        elapsedMs: Date.now() - runStartedAtMs,
+        model: parsedModel.canonical,
+        strategy: 'single',
+        chunkCount: 1,
+        report: finishReport,
+        color: verboseColor,
+      })
+      return
+    }
+
+    if (!summaryAlreadyPrinted) {
+      const rendered =
+        (effectiveRenderMode === 'md' || effectiveRenderMode === 'md-live') && isRichTty(stdout)
+          ? renderMarkdownAnsi(summary, {
+              width: terminalWidth(stdout, env),
+              wrap: true,
+              color: supportsColor(stdout, env),
+            })
+          : summary
+
+      stdout.write(rendered)
+      if (!rendered.endsWith('\n')) {
+        stdout.write('\n')
+      }
+    }
+
+    const report = await buildReport()
+    if (cost || verbose) writeCostReport(report)
+    writeFinishLine({
+      stderr,
+      elapsedMs: Date.now() - runStartedAtMs,
+      model: parsedModel.canonical,
+      strategy: 'single',
+      chunkCount: 1,
+      report,
+      color: verboseColor,
+    })
+  }
+
+  if (inputTarget.kind === 'file') {
+    const stopOscProgress = startOscProgress({
+      label: 'Loading file',
+      indeterminate: true,
+      env,
+      isTty: progressEnabled,
+      write: (data) => stderr.write(data),
+    })
+    const spinner = startSpinner({
+      text: 'Loading file…',
+      enabled: progressEnabled,
+      stream: stderr,
+    })
+    try {
+      const loaded = await loadLocalAsset({ filePath: inputTarget.filePath })
+      await summarizeAsset({
+        sourceKind: 'file',
+        sourceLabel: loaded.sourceLabel,
+        attachment: loaded.attachment,
+      })
+      return
+    } finally {
+      spinner.stop()
+      stopOscProgress()
+    }
+  }
+
+  if (url && !isYoutubeUrl) {
+    const kind = await classifyUrl({ url, fetchImpl: trackedFetch, timeoutMs })
+    if (kind.kind === 'asset') {
+      const stopOscProgress = startOscProgress({
+        label: 'Downloading file',
+        indeterminate: true,
+        env,
+        isTty: progressEnabled,
+        write: (data) => stderr.write(data),
+      })
+      const spinner = startSpinner({
+        text: 'Downloading file…',
+        enabled: progressEnabled,
+        stream: stderr,
+      })
+      try {
+        const loaded = await loadRemoteAsset({ url, fetchImpl: trackedFetch, timeoutMs })
+        await summarizeAsset({
+          sourceKind: 'asset-url',
+          sourceLabel: loaded.sourceLabel,
+          attachment: loaded.attachment,
+        })
+        return
+      } catch (error) {
+        if (error instanceof Error && /HTML/i.test(error.message)) {
+          // Fall back to website pipeline.
+        } else {
+          throw error
+        }
+      } finally {
+        spinner.stop()
+        stopOscProgress()
+      }
+    }
+  }
+
+  if (!url) {
+    throw new Error('Only HTTP and HTTPS URLs can be summarized')
+  }
+
   const firecrawlMode = (() => {
     if (raw) {
       return 'off'
@@ -677,7 +1014,6 @@ export async function runCli(
   })
 
   writeVerbose(stderr, verbose, 'extract start', verboseColor)
-  const progressEnabled = isRichTty(stderr) && !verbose && !json
   const stopOscProgress = startOscProgress({
     label: 'Fetching website',
     indeterminate: true,
@@ -767,15 +1103,16 @@ export async function runCli(
   })
 
   if (extractOnly) {
-    if (json) {
-      const finishReport = await buildReport()
-      const costReport = cost || verbose ? finishReport : null
-      const payload: JsonOutput = {
-        input: {
-          url,
-          timeoutMs,
-          youtube: youtubeMode,
-          firecrawl: firecrawlMode,
+	    if (json) {
+	      const finishReport = await buildReport()
+	      const costReport = cost || verbose ? finishReport : null
+	      const payload: JsonOutput = {
+	        input: {
+	          kind: 'url',
+	          url,
+	          timeoutMs,
+	          youtube: youtubeMode,
+	          firecrawl: firecrawlMode,
           markdown: effectiveMarkdownMode,
           length:
             lengthArg.kind === 'preset'
@@ -1135,15 +1472,16 @@ export async function runCli(
     throw new Error('LLM returned an empty summary')
   }
 
-  if (json) {
-    const finishReport = await buildReport()
-    const costReport = cost || verbose ? finishReport : null
-    const payload: JsonOutput = {
-      input: {
-        url,
-        timeoutMs,
-        youtube: youtubeMode,
-        firecrawl: firecrawlMode,
+	  if (json) {
+	    const finishReport = await buildReport()
+	    const costReport = cost || verbose ? finishReport : null
+	    const payload: JsonOutput = {
+	      input: {
+	        kind: 'url',
+	        url,
+	        timeoutMs,
+	        youtube: youtubeMode,
+	        firecrawl: firecrawlMode,
         markdown: effectiveMarkdownMode,
         length:
           lengthArg.kind === 'preset'

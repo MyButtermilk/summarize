@@ -1,4 +1,5 @@
 import { parseGatewayStyleModelId } from './model-id.js'
+import type { ModelMessage } from 'ai'
 
 export type LlmApiKeys = {
   xaiApiKey: string | null
@@ -53,7 +54,7 @@ export async function generateTextWithModelId({
   modelId: string
   apiKeys: LlmApiKeys
   system?: string
-  prompt: string
+  prompt: string | ModelMessage[]
   maxOutputTokens: number
   timeoutMs: number
   temperature: number
@@ -80,7 +81,7 @@ export async function generateTextWithModelId({
       const result = await generateText({
         model: xai(parsed.model),
         system,
-        prompt,
+        ...(typeof prompt === 'string' ? { prompt } : { messages: prompt }),
         temperature,
         maxOutputTokens,
         abortSignal: controller.signal,
@@ -101,7 +102,7 @@ export async function generateTextWithModelId({
       const result = await generateText({
         model: google(parsed.model),
         system,
-        prompt,
+        ...(typeof prompt === 'string' ? { prompt } : { messages: prompt }),
         temperature,
         maxOutputTokens,
         abortSignal: controller.signal,
@@ -122,7 +123,7 @@ export async function generateTextWithModelId({
       const result = await generateText({
         model: anthropic(parsed.model),
         system,
-        prompt,
+        ...(typeof prompt === 'string' ? { prompt } : { messages: prompt }),
         temperature,
         maxOutputTokens,
         abortSignal: controller.signal,
@@ -142,7 +143,7 @@ export async function generateTextWithModelId({
     const result = await generateText({
       model: openai(parsed.model),
       system,
-      prompt,
+      ...(typeof prompt === 'string' ? { prompt } : { messages: prompt }),
       temperature,
       maxOutputTokens,
       abortSignal: controller.signal,
@@ -176,7 +177,7 @@ export async function streamTextWithModelId({
   modelId: string
   apiKeys: LlmApiKeys
   system?: string
-  prompt: string
+  prompt: string | ModelMessage[]
   maxOutputTokens: number
   timeoutMs: number
   temperature: number
@@ -203,7 +204,7 @@ export async function streamTextWithModelId({
       const result = streamText({
         model: xai(parsed.model),
         system,
-        prompt,
+        ...(typeof prompt === 'string' ? { prompt } : { messages: prompt }),
         temperature,
         maxOutputTokens,
         abortSignal: controller.signal,
@@ -224,7 +225,7 @@ export async function streamTextWithModelId({
       const result = streamText({
         model: google(parsed.model),
         system,
-        prompt,
+        ...(typeof prompt === 'string' ? { prompt } : { messages: prompt }),
         temperature,
         maxOutputTokens,
         abortSignal: controller.signal,
@@ -245,7 +246,7 @@ export async function streamTextWithModelId({
       const result = streamText({
         model: anthropic(parsed.model),
         system,
-        prompt,
+        ...(typeof prompt === 'string' ? { prompt } : { messages: prompt }),
         temperature,
         maxOutputTokens,
         abortSignal: controller.signal,
@@ -265,7 +266,7 @@ export async function streamTextWithModelId({
     const result = streamText({
       model: openai(parsed.model),
       system,
-      prompt,
+      ...(typeof prompt === 'string' ? { prompt } : { messages: prompt }),
       temperature,
       maxOutputTokens,
       abortSignal: controller.signal,

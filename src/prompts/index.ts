@@ -7,3 +7,4 @@ export {
   SUMMARY_LENGTH_TO_TOKENS,
   type SummaryLengthTarget,
 } from './link-summary.js'
+export { buildFileSummaryPrompt } from './file.js'
