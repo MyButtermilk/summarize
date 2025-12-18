@@ -6,6 +6,7 @@ import { buildRunCostReport } from './costs.js'
 import type { LlmCall } from './costs.js'
 import { createFirecrawlScraper } from './firecrawl.js'
 import { loadLiteLlmCatalog, resolveLiteLlmPricingForModelId } from './pricing/litellm.js'
+import { createLiveMarkdownRenderer } from './tty/live-markdown.js'
 import {
   parseDurationMs,
   parseFirecrawlMode,
@@ -118,7 +119,7 @@ function buildProgram() {
     )
     .option(
       '--render <mode>',
-      'Render Markdown output: auto (TTY only), md, plain. Note: in stream mode, md rendering happens at the end (buffered).',
+      'Render Markdown output: auto (TTY only), md-live, md, plain. Note: auto selects md-live when streaming to a TTY.',
       'auto'
     )
     .option('--verbose', 'Print detailed progress info to stderr', false)
@@ -542,15 +543,16 @@ export async function runCli(
   const parsedModelForLlm = parseGatewayStyleModelId(model)
 
   const verboseColor = supportsColor(stderr, env)
-  const effectiveRenderMode = (() => {
-    if (renderMode !== 'auto') return renderMode
-    return isRichTty(stdout) ? 'md' : 'plain'
-  })()
   const effectiveStreamMode = (() => {
     if (streamMode !== 'auto') return streamMode
     return isRichTty(stdout) ? 'on' : 'off'
   })()
   const streamingEnabled = effectiveStreamMode === 'on' && !json && !extractOnly
+  const effectiveRenderMode = (() => {
+    if (renderMode !== 'auto') return renderMode
+    if (!isRichTty(stdout)) return 'plain'
+    return streamingEnabled ? 'md-live' : 'md'
+  })()
   const writeCostReport = (report: ReturnType<typeof buildRunCostReport>) => {
     const fmtUsd = (value: number | null) =>
       typeof value === 'number' && Number.isFinite(value) ? `$${value.toFixed(2)}` : 'unknown'
@@ -850,7 +852,10 @@ export async function runCli(
   let chunkCount = 1
   const shouldBufferSummaryForRender =
     streamingEnabled && effectiveRenderMode === 'md' && isRichTty(stdout)
-  const shouldStreamSummaryToStdout = streamingEnabled && !shouldBufferSummaryForRender
+  const shouldLiveRenderSummary =
+    streamingEnabled && effectiveRenderMode === 'md-live' && isRichTty(stdout)
+  const shouldStreamSummaryToStdout =
+    streamingEnabled && !shouldBufferSummaryForRender && !shouldLiveRenderSummary
   let summaryAlreadyPrinted = false
 
   let summary: string
@@ -873,11 +878,41 @@ export async function runCli(
         fetchImpl: trackedFetch,
       })
       let streamed = ''
-      for await (const delta of streamResult.textStream) {
-        streamed += delta
-        if (shouldStreamSummaryToStdout) {
-          stdout.write(delta)
+      const liveRenderer = shouldLiveRenderSummary
+        ? createLiveMarkdownRenderer({
+            stdout,
+            width: terminalWidth(stdout, env),
+            color: supportsColor(stdout, env),
+          })
+        : null
+      let lastFrameAtMs = 0
+      try {
+        for await (const delta of streamResult.textStream) {
+          streamed += delta
+          if (shouldStreamSummaryToStdout) {
+            stdout.write(delta)
+            continue
+          }
+
+          if (liveRenderer) {
+            const now = Date.now()
+            const due = now - lastFrameAtMs >= 120
+            const hasNewline = delta.includes('\n')
+            if (hasNewline || due) {
+              liveRenderer.render(streamed)
+              lastFrameAtMs = now
+            }
+          }
         }
+
+        const trimmed = streamed.trim()
+        streamed = trimmed
+        if (liveRenderer) {
+          liveRenderer.render(trimmed)
+          summaryAlreadyPrinted = true
+        }
+      } finally {
+        liveRenderer?.finish()
       }
       const usage = await streamResult.usage
       llmCalls.push({
@@ -994,11 +1029,41 @@ export async function runCli(
         fetchImpl: trackedFetch,
       })
       let streamed = ''
-      for await (const delta of streamResult.textStream) {
-        streamed += delta
-        if (shouldStreamSummaryToStdout) {
-          stdout.write(delta)
+      const liveRenderer = shouldLiveRenderSummary
+        ? createLiveMarkdownRenderer({
+            stdout,
+            width: terminalWidth(stdout, env),
+            color: supportsColor(stdout, env),
+          })
+        : null
+      let lastFrameAtMs = 0
+      try {
+        for await (const delta of streamResult.textStream) {
+          streamed += delta
+          if (shouldStreamSummaryToStdout) {
+            stdout.write(delta)
+            continue
+          }
+
+          if (liveRenderer) {
+            const now = Date.now()
+            const due = now - lastFrameAtMs >= 120
+            const hasNewline = delta.includes('\n')
+            if (hasNewline || due) {
+              liveRenderer.render(streamed)
+              lastFrameAtMs = now
+            }
+          }
         }
+
+        const trimmed = streamed.trim()
+        streamed = trimmed
+        if (liveRenderer) {
+          liveRenderer.render(trimmed)
+          summaryAlreadyPrinted = true
+        }
+      } finally {
+        liveRenderer?.finish()
       }
       const usage = await streamResult.usage
       llmCalls.push({
@@ -1092,7 +1157,7 @@ export async function runCli(
 
   if (!summaryAlreadyPrinted) {
     const rendered =
-      effectiveRenderMode === 'md' && isRichTty(stdout)
+      (effectiveRenderMode === 'md' || effectiveRenderMode === 'md-live') && isRichTty(stdout)
         ? renderMarkdownAnsi(summary, {
             width: terminalWidth(stdout, env),
             wrap: true,

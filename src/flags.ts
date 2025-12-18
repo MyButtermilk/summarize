@@ -4,7 +4,7 @@ export type YoutubeMode = 'auto' | 'web' | 'apify'
 export type FirecrawlMode = 'off' | 'auto' | 'always'
 export type MarkdownMode = 'off' | 'auto' | 'llm'
 export type StreamMode = 'auto' | 'on' | 'off'
-export type RenderMode = 'auto' | 'md' | 'plain'
+export type RenderMode = 'auto' | 'md' | 'md-live' | 'plain'
 
 export type LengthArg =
   | { kind: 'preset'; preset: SummaryLength }
@@ -42,6 +42,7 @@ export function parseStreamMode(raw: string): StreamMode {
 export function parseRenderMode(raw: string): RenderMode {
   const normalized = raw.trim().toLowerCase()
   if (normalized === 'auto' || normalized === 'plain') return normalized as RenderMode
+  if (normalized === 'md-live' || normalized === 'live' || normalized === 'mdlive') return 'md-live'
   if (normalized === 'md' || normalized === 'markdown') return 'md'
   throw new Error(`Unsupported --render: ${raw}`)
 }

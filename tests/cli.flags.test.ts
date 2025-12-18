@@ -51,6 +51,9 @@ describe('cli flag parsing', () => {
   it('parses --render', () => {
     expect(parseRenderMode('auto')).toBe('auto')
     expect(parseRenderMode('plain')).toBe('plain')
+    expect(parseRenderMode('md-live')).toBe('md-live')
+    expect(parseRenderMode('mdlive')).toBe('md-live')
+    expect(parseRenderMode('live')).toBe('md-live')
     expect(parseRenderMode('md')).toBe('md')
     expect(parseRenderMode('markdown')).toBe('md')
     expect(() => parseRenderMode('nope')).toThrow(/Unsupported --render/)
