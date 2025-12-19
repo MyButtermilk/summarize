@@ -30,10 +30,10 @@ function normalizeUrlInput(raw: string): string {
 
 function trimLikelyUrlPunctuation(raw: string): string {
   let value = raw.trim()
-  while (value.length > 0 && /[)\].,;:'">}]/.test(value[value.length - 1] ?? '')) {
+  while (value.length > 0 && /[)\].,;:'">}”’»]/.test(value[value.length - 1] ?? '')) {
     value = value.slice(0, -1)
   }
-  while (value.length > 0 && /^[('"<{[\]]/.test(value[0] ?? '')) {
+  while (value.length > 0 && /^[('"<{[\]“‘«]/.test(value[0] ?? '')) {
     value = value.slice(1)
   }
   return value
@@ -85,7 +85,15 @@ export function resolveInputTarget(raw: string): InputTarget {
   const extractedUrls = extractHttpUrlsFromText(normalized)
   const extractedLast = extractedUrls.at(-1) ?? null
   if (extractedLast && extractedLast !== normalized) {
-    return resolveInputTarget(extractedLast)
+    for (let i = extractedUrls.length - 1; i >= 0; i -= 1) {
+      const candidate = extractedUrls[i]
+      if (!candidate) continue
+      try {
+        return resolveInputTarget(candidate)
+      } catch {
+        // keep trying earlier candidates
+      }
+    }
   }
 
   let parsed: URL
