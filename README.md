@@ -98,7 +98,7 @@ Non-YouTube URLs go through a “fetch → extract” pipeline. When the direct 
 
 - `--firecrawl off|auto|always` (default `auto`)
 - `--markdown off|auto|llm` (default `auto`; only affects `--extract-only` for non-YouTube URLs)
-- Raw mode: use `--firecrawl off --markdown off` (there is no `--raw` flag).
+- Plain-text mode: use `--firecrawl off --markdown off`.
 
 ## YouTube transcripts (Apify fallback)
 
