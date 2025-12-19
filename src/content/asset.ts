@@ -18,6 +18,33 @@ export type AssetAttachment = {
 
 const MAX_ASSET_BYTES_DEFAULT = 50 * 1024 * 1024
 
+function normalizeUrlInput(raw: string): string {
+  return (
+    raw
+      // Common shell copy/paste mistakes: `\?` / `\=` / `\&` inside quotes.
+      .replaceAll(/\\([?&=])/g, '$1')
+      // Sometimes backslashes get percent-encoded (`%5C`) and end up right before separators.
+      .replaceAll(/%5c(?=[?&=])/gi, '')
+  )
+}
+
+function trimLikelyUrlPunctuation(raw: string): string {
+  let value = raw.trim()
+  while (value.length > 0 && /[)\].,;:'">}]/.test(value[value.length - 1] ?? '')) {
+    value = value.slice(0, -1)
+  }
+  while (value.length > 0 && /^[('"<{[\]]/.test(value[0] ?? '')) {
+    value = value.slice(1)
+  }
+  return value
+}
+
+function extractHttpUrlsFromText(raw: string): string[] {
+  return [...raw.matchAll(/https?:\/\/\S+/g)]
+    .map((match) => trimLikelyUrlPunctuation(match[0] ?? ''))
+    .filter((candidate) => candidate.length > 0)
+}
+
 function normalizeHeaderMediaType(value: string | null): string | null {
   if (!value) return null
   const trimmed = value.trim()
@@ -55,9 +82,16 @@ export function resolveInputTarget(raw: string): InputTarget {
     return { kind: 'file', filePath: asPath }
   }
 
+  const extractedUrls = extractHttpUrlsFromText(normalized)
+  const extractedLast = extractedUrls.at(-1) ?? null
+  if (extractedLast && extractedLast !== normalized) {
+    return resolveInputTarget(extractedLast)
+  }
+
   let parsed: URL
+  const normalizedUrlInput = normalizeUrlInput(normalized)
   try {
-    parsed = new URL(normalized)
+    parsed = new URL(normalizedUrlInput)
   } catch {
     throw new Error(`Invalid URL or file path: ${raw}`)
   }
@@ -80,7 +114,9 @@ export function resolveInputTarget(raw: string): InputTarget {
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new Error('Only HTTP and HTTPS URLs can be summarized')
   }
-  return { kind: 'url', url: normalized }
+  // Preserve user input (do not canonicalize like adding trailing slashes),
+  // but apply our minimal normalization fixes (e.g. `\\?` -> `?`).
+  return { kind: 'url', url: normalizedUrlInput }
 }
 
 export async function classifyUrl({
