@@ -254,13 +254,11 @@ function assertProviderSupportsAttachment({
 
 async function resolveModelIdForLlmCall({
   parsedModel,
-  streamingEnabled,
   apiKeys,
   fetchImpl,
   timeoutMs,
 }: {
   parsedModel: ReturnType<typeof parseGatewayStyleModelId>
-  streamingEnabled: boolean
   apiKeys: {
     googleApiKey: string | null
   }
@@ -283,39 +281,31 @@ async function resolveModelIdForLlmCall({
     timeoutMs,
   })
 
-  const supportsStreaming =
-    resolved.supportedMethods.length === 0 ||
-    resolved.supportedMethods.includes('streamGenerateContent')
-  const supportsNonStreaming =
-    resolved.supportedMethods.length === 0 || resolved.supportedMethods.includes('generateContent')
-
-  if (streamingEnabled && !supportsStreaming && supportsNonStreaming) {
-    return {
-      modelId: `google/${resolved.resolvedModelId}`,
-      note:
-        resolved.note ??
-        `Google model google/${resolved.resolvedModelId} does not support streaming; falling back to non-streaming.`,
-      forceStreamOff: true,
-    }
-  }
-
-  if (streamingEnabled && !supportsStreaming) {
-    throw new Error(
-      `Google model google/${resolved.resolvedModelId} exists but does not support streamGenerateContent.`
-    )
-  }
-
-  if (!streamingEnabled && !supportsNonStreaming) {
-    throw new Error(
-      `Google model google/${resolved.resolvedModelId} exists but does not support generateContent.`
-    )
-  }
-
   return {
     modelId: `google/${resolved.resolvedModelId}`,
     note: resolved.note,
     forceStreamOff: false,
   }
+}
+
+function isGoogleStreamingUnsupportedError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false
+  const maybe = error as Record<string, unknown>
+  const message = typeof maybe.message === 'string' ? maybe.message : ''
+  const url = typeof maybe.url === 'string' ? maybe.url : ''
+  const responseBody = typeof maybe.responseBody === 'string' ? maybe.responseBody : ''
+  const errorText = `${message}\n${responseBody}`
+
+  const isStreamEndpoint =
+    url.includes(':streamGenerateContent') || errorText.includes('streamGenerateContent')
+  if (!isStreamEndpoint) return false
+
+  return (
+    /does not support/i.test(errorText) ||
+    /not supported/i.test(errorText) ||
+    /Call ListModels/i.test(errorText) ||
+    /supported methods/i.test(errorText)
+  )
 }
 
 function attachRichHelp(
@@ -814,7 +804,6 @@ export async function runCli(
 
     const modelResolution = await resolveModelIdForLlmCall({
       parsedModel,
-      streamingEnabled,
       apiKeys: { googleApiKey: apiKeysForLlm.googleApiKey },
       fetchImpl: trackedFetch,
       timeoutMs,
@@ -849,10 +838,10 @@ export async function runCli(
       streamingEnabledForCall && !shouldBufferSummaryForRender && !shouldLiveRenderSummary
 
     let summaryAlreadyPrinted = false
-    let summary: string
+    let summary = ''
 
     if (streamingEnabledForCall) {
-      let streamResult: Awaited<ReturnType<typeof streamTextWithModelId>>
+      let streamResult: Awaited<ReturnType<typeof streamTextWithModelId>> | null = null
       try {
         streamResult = await streamTextWithModelId({
           modelId: parsedModelEffective.canonical,
@@ -864,90 +853,119 @@ export async function runCli(
           fetchImpl: trackedFetch,
         })
       } catch (error) {
-        if (isUnsupportedAttachmentError(error)) {
+        if (
+          parsedModelEffective.provider === 'google' &&
+          isGoogleStreamingUnsupportedError(error)
+        ) {
+          writeVerbose(
+            stderr,
+            verbose,
+            `Google model ${parsedModelEffective.canonical} rejected streamGenerateContent; falling back to non-streaming.`,
+            verboseColor
+          )
+          const result = await summarizeWithModelId({
+            modelId: parsedModelEffective.canonical,
+            prompt: promptPayload,
+            maxOutputTokens: maxOutputTokensCapped,
+            timeoutMs,
+            fetchImpl: trackedFetch,
+            apiKeys: apiKeysForLlm,
+          })
+          llmCalls.push({
+            provider: result.provider,
+            model: result.canonicalModelId,
+            usage: result.usage,
+            purpose: 'summary',
+          })
+          summary = result.text
+          streamResult = null
+        } else if (isUnsupportedAttachmentError(error)) {
           throw new Error(
             `Model ${parsedModel.canonical} does not support attaching files of type ${attachment.mediaType}. Try a different --model (e.g. google/gemini-3-flash-preview).`,
             { cause: error }
           )
-        }
-        throw error
-      }
-
-      let streamed = ''
-      const liveRenderer = shouldLiveRenderSummary
-        ? createLiveRenderer({
-            write: (chunk) => {
-              clearProgressForStdout()
-              stdout.write(chunk)
-            },
-            width: terminalWidth(stdout, env),
-            renderFrame: (markdown) =>
-              renderMarkdownAnsi(markdown, {
-                width: terminalWidth(stdout, env),
-                wrap: true,
-                color: supportsColor(stdout, env),
-              }),
-          })
-        : null
-      let lastFrameAtMs = 0
-      try {
-        try {
-          let cleared = false
-          for await (const delta of streamResult.textStream) {
-            if (!cleared) {
-              clearProgressForStdout()
-              cleared = true
-            }
-            streamed += delta
-            if (shouldStreamSummaryToStdout) {
-              stdout.write(delta)
-              continue
-            }
-
-            if (liveRenderer) {
-              const now = Date.now()
-              const due = now - lastFrameAtMs >= 120
-              const hasNewline = delta.includes('\n')
-              if (hasNewline || due) {
-                liveRenderer.render(streamed)
-                lastFrameAtMs = now
-              }
-            }
-          }
-        } catch (error) {
-          if (isUnsupportedAttachmentError(error)) {
-            throw new Error(
-              `Model ${parsedModel.canonical} does not support attaching files of type ${attachment.mediaType}. Try a different --model (e.g. google/gemini-3-flash-preview).`,
-              { cause: error }
-            )
-          }
+        } else {
           throw error
         }
-
-        const trimmed = streamed.trim()
-        streamed = trimmed
-        if (liveRenderer) {
-          liveRenderer.render(trimmed)
-          summaryAlreadyPrinted = true
-        }
-      } finally {
-        liveRenderer?.finish()
       }
 
-      const usage = await streamResult.usage
-      llmCalls.push({
-        provider: streamResult.provider,
-        model: streamResult.canonicalModelId,
-        usage,
-        purpose: 'summary',
-      })
-      summary = streamed
+      if (streamResult) {
+        let streamed = ''
+        const liveRenderer = shouldLiveRenderSummary
+          ? createLiveRenderer({
+              write: (chunk) => {
+                clearProgressForStdout()
+                stdout.write(chunk)
+              },
+              width: terminalWidth(stdout, env),
+              renderFrame: (markdown) =>
+                renderMarkdownAnsi(markdown, {
+                  width: terminalWidth(stdout, env),
+                  wrap: true,
+                  color: supportsColor(stdout, env),
+                }),
+            })
+          : null
+        let lastFrameAtMs = 0
+        try {
+          try {
+            let cleared = false
+            for await (const delta of streamResult.textStream) {
+              if (!cleared) {
+                clearProgressForStdout()
+                cleared = true
+              }
+              streamed += delta
+              if (shouldStreamSummaryToStdout) {
+                stdout.write(delta)
+                continue
+              }
 
-      if (shouldStreamSummaryToStdout) {
-        if (!streamed.endsWith('\n')) {
-          stdout.write('\n')
+              if (liveRenderer) {
+                const now = Date.now()
+                const due = now - lastFrameAtMs >= 120
+                const hasNewline = delta.includes('\n')
+                if (hasNewline || due) {
+                  liveRenderer.render(streamed)
+                  lastFrameAtMs = now
+                }
+              }
+            }
+          } catch (error) {
+            if (isUnsupportedAttachmentError(error)) {
+              throw new Error(
+                `Model ${parsedModel.canonical} does not support attaching files of type ${attachment.mediaType}. Try a different --model (e.g. google/gemini-3-flash-preview).`,
+                { cause: error }
+              )
+            }
+            throw error
+          }
+
+          const trimmed = streamed.trim()
+          streamed = trimmed
+          if (liveRenderer) {
+            liveRenderer.render(trimmed)
+            summaryAlreadyPrinted = true
+          }
+        } finally {
+          liveRenderer?.finish()
         }
-        summaryAlreadyPrinted = true
+
+        const usage = await streamResult.usage
+        llmCalls.push({
+          provider: streamResult.provider,
+          model: streamResult.canonicalModelId,
+          usage,
+          purpose: 'summary',
+        })
+        summary = streamed
+
+        if (shouldStreamSummaryToStdout) {
+          if (!streamed.endsWith('\n')) {
+            stdout.write('\n')
+          }
+          summaryAlreadyPrinted = true
+        }
       }
     } else {
       let result: Awaited<ReturnType<typeof summarizeWithModelId>>
@@ -1479,7 +1497,6 @@ export async function runCli(
 
     const modelResolution = await resolveModelIdForLlmCall({
       parsedModel,
-      streamingEnabled,
       apiKeys: { googleApiKey: apiKeysForLlm.googleApiKey },
       fetchImpl: trackedFetch,
       timeoutMs,
@@ -1516,7 +1533,7 @@ export async function runCli(
       streamingEnabledForCall && !shouldBufferSummaryForRender && !shouldLiveRenderSummary
     let summaryAlreadyPrinted = false
 
-    let summary: string
+    let summary = ''
     if (!isLargeContent) {
       writeVerbose(stderr, verbose, 'summarize strategy=single', verboseColor)
       if (streamingEnabledForCall) {
@@ -1526,78 +1543,114 @@ export async function runCli(
           `summarize stream=on buffered=${shouldBufferSummaryForRender}`,
           verboseColor
         )
-        const streamResult = await streamTextWithModelId({
-          modelId: parsedModelEffective.canonical,
-          apiKeys: apiKeysForLlm,
-          prompt,
-          temperature: 0,
-          maxOutputTokens: maxOutputTokensForCall,
-          timeoutMs,
-          fetchImpl: trackedFetch,
-        })
-        let streamed = ''
-        const liveRenderer = shouldLiveRenderSummary
-          ? createLiveRenderer({
-              write: (chunk) => {
-                clearProgressForStdout()
-                stdout.write(chunk)
-              },
-              width: terminalWidth(stdout, env),
-              renderFrame: (markdown) =>
-                renderMarkdownAnsi(markdown, {
-                  width: terminalWidth(stdout, env),
-                  wrap: true,
-                  color: supportsColor(stdout, env),
-                }),
-            })
-          : null
-        let lastFrameAtMs = 0
+        let streamResult: Awaited<ReturnType<typeof streamTextWithModelId>> | null = null
         try {
-          let cleared = false
-          for await (const delta of streamResult.textStream) {
-            if (!cleared) {
-              clearProgressForStdout()
-              cleared = true
-            }
-            streamed += delta
-            if (shouldStreamSummaryToStdout) {
-              stdout.write(delta)
-              continue
-            }
+          streamResult = await streamTextWithModelId({
+            modelId: parsedModelEffective.canonical,
+            apiKeys: apiKeysForLlm,
+            prompt,
+            temperature: 0,
+            maxOutputTokens: maxOutputTokensForCall,
+            timeoutMs,
+            fetchImpl: trackedFetch,
+          })
+        } catch (error) {
+          if (
+            parsedModelEffective.provider === 'google' &&
+            isGoogleStreamingUnsupportedError(error)
+          ) {
+            writeVerbose(
+              stderr,
+              verbose,
+              `Google model ${parsedModelEffective.canonical} rejected streamGenerateContent; falling back to non-streaming.`,
+              verboseColor
+            )
+            const result = await summarizeWithModelId({
+              modelId: parsedModelEffective.canonical,
+              prompt,
+              maxOutputTokens: maxOutputTokensForCall,
+              timeoutMs,
+              fetchImpl: trackedFetch,
+              apiKeys: apiKeysForLlm,
+            })
+            llmCalls.push({
+              provider: result.provider,
+              model: result.canonicalModelId,
+              usage: result.usage,
+              purpose: 'summary',
+            })
+            summary = result.text
+            streamResult = null
+          } else {
+            throw error
+          }
+        }
 
-            if (liveRenderer) {
-              const now = Date.now()
-              const due = now - lastFrameAtMs >= 120
-              const hasNewline = delta.includes('\n')
-              if (hasNewline || due) {
-                liveRenderer.render(streamed)
-                lastFrameAtMs = now
+        if (streamResult) {
+          let streamed = ''
+          const liveRenderer = shouldLiveRenderSummary
+            ? createLiveRenderer({
+                write: (chunk) => {
+                  clearProgressForStdout()
+                  stdout.write(chunk)
+                },
+                width: terminalWidth(stdout, env),
+                renderFrame: (markdown) =>
+                  renderMarkdownAnsi(markdown, {
+                    width: terminalWidth(stdout, env),
+                    wrap: true,
+                    color: supportsColor(stdout, env),
+                  }),
+              })
+            : null
+          let lastFrameAtMs = 0
+          try {
+            let cleared = false
+            for await (const delta of streamResult.textStream) {
+              if (!cleared) {
+                clearProgressForStdout()
+                cleared = true
+              }
+              streamed += delta
+              if (shouldStreamSummaryToStdout) {
+                stdout.write(delta)
+                continue
+              }
+
+              if (liveRenderer) {
+                const now = Date.now()
+                const due = now - lastFrameAtMs >= 120
+                const hasNewline = delta.includes('\n')
+                if (hasNewline || due) {
+                  liveRenderer.render(streamed)
+                  lastFrameAtMs = now
+                }
               }
             }
-          }
 
-          const trimmed = streamed.trim()
-          streamed = trimmed
-          if (liveRenderer) {
-            liveRenderer.render(trimmed)
+            const trimmed = streamed.trim()
+            streamed = trimmed
+            if (liveRenderer) {
+              liveRenderer.render(trimmed)
+              summaryAlreadyPrinted = true
+            }
+          } finally {
+            liveRenderer?.finish()
+          }
+          const usage = await streamResult.usage
+          llmCalls.push({
+            provider: streamResult.provider,
+            model: streamResult.canonicalModelId,
+            usage,
+            purpose: 'summary',
+          })
+          summary = streamed
+          if (shouldStreamSummaryToStdout) {
+            if (!streamed.endsWith('\n')) {
+              stdout.write('\n')
+            }
             summaryAlreadyPrinted = true
           }
-        } finally {
-          liveRenderer?.finish()
-        }
-        const usage = await streamResult.usage
-        llmCalls.push({
-          provider: streamResult.provider,
-          model: streamResult.canonicalModelId,
-          usage,
-          purpose: 'summary',
-        })
-        summary = streamed
-        if (shouldStreamSummaryToStdout) {
-          if (!streamed.endsWith('\n')) {
-            stdout.write('\n')
-          }
-          summaryAlreadyPrinted = true
         }
       } else {
         const result = await summarizeWithModelId({
@@ -1696,78 +1749,114 @@ export async function runCli(
           `summarize stream=on buffered=${shouldBufferSummaryForRender}`,
           verboseColor
         )
-        const streamResult = await streamTextWithModelId({
-          modelId: parsedModelEffective.canonical,
-          apiKeys: apiKeysForLlm,
-          prompt: mergedPrompt,
-          temperature: 0,
-          maxOutputTokens: maxOutputTokensForCall,
-          timeoutMs,
-          fetchImpl: trackedFetch,
-        })
-        let streamed = ''
-        const liveRenderer = shouldLiveRenderSummary
-          ? createLiveRenderer({
-              write: (chunk) => {
-                clearProgressForStdout()
-                stdout.write(chunk)
-              },
-              width: terminalWidth(stdout, env),
-              renderFrame: (markdown) =>
-                renderMarkdownAnsi(markdown, {
-                  width: terminalWidth(stdout, env),
-                  wrap: true,
-                  color: supportsColor(stdout, env),
-                }),
-            })
-          : null
-        let lastFrameAtMs = 0
+        let streamResult: Awaited<ReturnType<typeof streamTextWithModelId>> | null = null
         try {
-          let cleared = false
-          for await (const delta of streamResult.textStream) {
-            if (!cleared) {
-              clearProgressForStdout()
-              cleared = true
-            }
-            streamed += delta
-            if (shouldStreamSummaryToStdout) {
-              stdout.write(delta)
-              continue
-            }
+          streamResult = await streamTextWithModelId({
+            modelId: parsedModelEffective.canonical,
+            apiKeys: apiKeysForLlm,
+            prompt: mergedPrompt,
+            temperature: 0,
+            maxOutputTokens: maxOutputTokensForCall,
+            timeoutMs,
+            fetchImpl: trackedFetch,
+          })
+        } catch (error) {
+          if (
+            parsedModelEffective.provider === 'google' &&
+            isGoogleStreamingUnsupportedError(error)
+          ) {
+            writeVerbose(
+              stderr,
+              verbose,
+              `Google model ${parsedModelEffective.canonical} rejected streamGenerateContent; falling back to non-streaming.`,
+              verboseColor
+            )
+            const mergedResult = await summarizeWithModelId({
+              modelId: parsedModelEffective.canonical,
+              prompt: mergedPrompt,
+              maxOutputTokens: maxOutputTokensForCall,
+              timeoutMs,
+              fetchImpl: trackedFetch,
+              apiKeys: apiKeysForLlm,
+            })
+            llmCalls.push({
+              provider: mergedResult.provider,
+              model: mergedResult.canonicalModelId,
+              usage: mergedResult.usage,
+              purpose: 'summary',
+            })
+            summary = mergedResult.text
+            streamResult = null
+          } else {
+            throw error
+          }
+        }
 
-            if (liveRenderer) {
-              const now = Date.now()
-              const due = now - lastFrameAtMs >= 120
-              const hasNewline = delta.includes('\n')
-              if (hasNewline || due) {
-                liveRenderer.render(streamed)
-                lastFrameAtMs = now
+        if (streamResult) {
+          let streamed = ''
+          const liveRenderer = shouldLiveRenderSummary
+            ? createLiveRenderer({
+                write: (chunk) => {
+                  clearProgressForStdout()
+                  stdout.write(chunk)
+                },
+                width: terminalWidth(stdout, env),
+                renderFrame: (markdown) =>
+                  renderMarkdownAnsi(markdown, {
+                    width: terminalWidth(stdout, env),
+                    wrap: true,
+                    color: supportsColor(stdout, env),
+                  }),
+              })
+            : null
+          let lastFrameAtMs = 0
+          try {
+            let cleared = false
+            for await (const delta of streamResult.textStream) {
+              if (!cleared) {
+                clearProgressForStdout()
+                cleared = true
+              }
+              streamed += delta
+              if (shouldStreamSummaryToStdout) {
+                stdout.write(delta)
+                continue
+              }
+
+              if (liveRenderer) {
+                const now = Date.now()
+                const due = now - lastFrameAtMs >= 120
+                const hasNewline = delta.includes('\n')
+                if (hasNewline || due) {
+                  liveRenderer.render(streamed)
+                  lastFrameAtMs = now
+                }
               }
             }
-          }
 
-          const trimmed = streamed.trim()
-          streamed = trimmed
-          if (liveRenderer) {
-            liveRenderer.render(trimmed)
+            const trimmed = streamed.trim()
+            streamed = trimmed
+            if (liveRenderer) {
+              liveRenderer.render(trimmed)
+              summaryAlreadyPrinted = true
+            }
+          } finally {
+            liveRenderer?.finish()
+          }
+          const usage = await streamResult.usage
+          llmCalls.push({
+            provider: streamResult.provider,
+            model: streamResult.canonicalModelId,
+            usage,
+            purpose: 'summary',
+          })
+          summary = streamed
+          if (shouldStreamSummaryToStdout) {
+            if (!streamed.endsWith('\n')) {
+              stdout.write('\n')
+            }
             summaryAlreadyPrinted = true
           }
-        } finally {
-          liveRenderer?.finish()
-        }
-        const usage = await streamResult.usage
-        llmCalls.push({
-          provider: streamResult.provider,
-          model: streamResult.canonicalModelId,
-          usage,
-          purpose: 'summary',
-        })
-        summary = streamed
-        if (shouldStreamSummaryToStdout) {
-          if (!streamed.endsWith('\n')) {
-            stdout.write('\n')
-          }
-          summaryAlreadyPrinted = true
         }
       } else {
         const mergedResult = await summarizeWithModelId({
