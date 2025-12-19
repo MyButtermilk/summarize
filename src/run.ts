@@ -563,10 +563,7 @@ function formatUSD(value: number): string {
   return `$${value.toFixed(4)}`
 }
 
-function mergeStreamingChunk(
-  previous: string,
-  chunk: string
-): { next: string; appended: string } {
+function mergeStreamingChunk(previous: string, chunk: string): { next: string; appended: string } {
   if (!chunk) return { next: previous, appended: '' }
   if (chunk.startsWith(previous)) {
     return { next: chunk, appended: chunk.slice(previous.length) }
