@@ -13,7 +13,7 @@
 
 ### Tests
 
-- Add coverage for yt-dlp mode ordering and missing-key errors.
+- Add coverage for yt-dlp ordering, missing-key errors, and helper paths.
 
 ### Dev
 
