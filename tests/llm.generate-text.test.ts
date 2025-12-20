@@ -259,4 +259,26 @@ describe('llm generate/stream', () => {
       })
     ).rejects.toThrow(/timed out/i)
   })
+
+  it('times out when a stream stalls before yielding', async () => {
+    streamTextMock.mockImplementationOnce(() => ({
+      textStream: {
+        async *[Symbol.asyncIterator]() {
+          await new Promise(() => {})
+        },
+      },
+      totalUsage: new Promise(() => {}),
+    }))
+    const result = await streamTextWithModelId({
+      modelId: 'openai/gpt-5.2',
+      apiKeys: { openaiApiKey: 'k', xaiApiKey: null, googleApiKey: null, anthropicApiKey: null },
+      prompt: 'hi',
+      timeoutMs: 5,
+      fetchImpl: globalThis.fetch.bind(globalThis),
+      maxOutputTokens: 10,
+    })
+    const iterator = result.textStream[Symbol.asyncIterator]()
+    const nextPromise = iterator.next()
+    await expect(nextPromise).rejects.toThrow(/timed out/i)
+  }, 250)
 })

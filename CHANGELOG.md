@@ -11,6 +11,7 @@
 - Compute cost totals via tokentally’s tally helpers.
 - Improve fetch spinner with elapsed time and throughput updates.
 - Show Firecrawl fallback status and reason when scraping kicks in.
+- Enforce a hard deadline for stalled streaming LLM responses.
 
 ## 0.1.1 - 2025-12-19
 

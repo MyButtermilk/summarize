@@ -249,11 +249,74 @@ export async function streamTextWithModelId({
   const parsed = parseGatewayStyleModelId(modelId)
 
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  let timeoutId: ReturnType<typeof setTimeout> | null = null
+  const startedAtMs = Date.now()
+  let lastError: unknown = null
+  const timeoutError = new Error('LLM request timed out')
+  const markTimedOut = () => {
+    if (lastError === timeoutError) return
+    lastError = timeoutError
+    controller.abort()
+  }
+
+  const startTimeout = () => {
+    if (timeoutId) return
+    timeoutId = setTimeout(markTimedOut, timeoutMs)
+  }
+
+  const stopTimeout = () => {
+    if (!timeoutId) return
+    clearTimeout(timeoutId)
+    timeoutId = null
+  }
+
+  const nextWithDeadline = async <T>(promise: Promise<T>): Promise<T> => {
+    const elapsed = Date.now() - startedAtMs
+    const remaining = timeoutMs - elapsed
+    if (remaining <= 0) {
+      markTimedOut()
+      throw timeoutError
+    }
+    let timer: ReturnType<typeof setTimeout> | null = null
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            markTimedOut()
+            reject(timeoutError)
+          }, remaining)
+        }),
+      ])
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
+  }
+
+  const wrapTextStream = (textStream: AsyncIterable<string>): AsyncIterable<string> => ({
+    async *[Symbol.asyncIterator]() {
+      startTimeout()
+      const iterator = textStream[Symbol.asyncIterator]()
+      try {
+        while (true) {
+          const result = await nextWithDeadline(iterator.next())
+          if (result.done) break
+          yield result.value
+        }
+      } finally {
+        stopTimeout()
+        if (typeof iterator.return === 'function') {
+          const cleanup = iterator.return()
+          if (cleanup && typeof (cleanup as Promise<unknown>).catch === 'function') {
+            ;(cleanup as Promise<unknown>).catch(() => {})
+          }
+        }
+      }
+    },
+  })
 
   try {
     const { streamText } = await import('ai')
-    let lastError: unknown = null
     const onError = ({ error }: { error: unknown }) => {
       if (parsed.provider === 'anthropic') {
         lastError = normalizeAnthropicModelAccessError(error, parsed.model) ?? error
@@ -277,7 +340,7 @@ export async function streamTextWithModelId({
         onError,
       })
       return {
-        textStream: result.textStream,
+        textStream: wrapTextStream(result.textStream),
         canonicalModelId: parsed.canonical,
         provider: parsed.provider,
         usage: result.totalUsage.then((raw) => normalizeTokenUsage(raw)).catch(() => null),
@@ -303,7 +366,7 @@ export async function streamTextWithModelId({
         onError,
       })
       return {
-        textStream: result.textStream,
+        textStream: wrapTextStream(result.textStream),
         canonicalModelId: parsed.canonical,
         provider: parsed.provider,
         usage: result.totalUsage.then((raw) => normalizeTokenUsage(raw)).catch(() => null),
@@ -326,7 +389,7 @@ export async function streamTextWithModelId({
         onError,
       })
       return {
-        textStream: result.textStream,
+        textStream: wrapTextStream(result.textStream),
         canonicalModelId: parsed.canonical,
         provider: parsed.provider,
         usage: result.totalUsage.then((raw) => normalizeTokenUsage(raw)).catch(() => null),
@@ -353,7 +416,7 @@ export async function streamTextWithModelId({
       onError,
     })
     return {
-      textStream: result.textStream,
+      textStream: wrapTextStream(result.textStream),
       canonicalModelId: parsed.canonical,
       provider: parsed.provider,
       usage: result.totalUsage.then((raw) => normalizeTokenUsage(raw)).catch(() => null),
@@ -369,6 +432,6 @@ export async function streamTextWithModelId({
     }
     throw error
   } finally {
-    clearTimeout(timeout)
+    stopTimeout()
   }
 }
