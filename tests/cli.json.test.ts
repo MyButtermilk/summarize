@@ -108,4 +108,47 @@ describe('cli --json', () => {
     expect(parsed.llm).toBeNull()
     expect(parsed.summary).toBeNull()
   })
+
+  it('caps prompt guidance when requested length exceeds extracted content', async () => {
+    const bodyText = 'Short content only.'
+    const html =
+      '<!doctype html><html><head><title>Ok</title><meta name="description" content="Desc" /></head>' +
+      `<body><article><p>${bodyText}</p></article></body></html>`
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.url
+      if (url === 'https://example.com') {
+        return htmlResponse(html)
+      }
+      throw new Error(`Unexpected fetch call: ${url}`)
+    })
+
+    let stdoutText = ''
+    const stdout = new Writable({
+      write(chunk, _encoding, callback) {
+        stdoutText += chunk.toString()
+        callback()
+      },
+    })
+
+    await runCli(
+      ['--json', '--extract-only', '--length', 'xxl', '--timeout', '2s', 'https://example.com'],
+      {
+        env: {},
+        fetch: fetchMock as unknown as typeof fetch,
+        stdout,
+        stderr: new Writable({
+          write(_chunk, _encoding, callback) {
+            callback()
+          },
+        }),
+      }
+    )
+
+    const parsed = JSON.parse(stdoutText) as { prompt: string; extracted: { content: string } }
+    expect(parsed.prompt).toContain(
+      `Extracted content length: ${parsed.extracted.content.length} characters`
+    )
+    expect(parsed.prompt).toContain('Write a tight paragraph')
+  })
 })

@@ -13,6 +13,7 @@
 - Show Firecrawl fallback status and reason when scraping kicks in.
 - Enforce a hard deadline for stalled streaming LLM responses.
 - Cap summaries to the extracted content length when a requested size is larger.
+- Add CLI + live coverage for prompt length capping.
 
 ## 0.1.1 - 2025-12-19
 
