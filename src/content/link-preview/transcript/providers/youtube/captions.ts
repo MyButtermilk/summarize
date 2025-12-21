@@ -325,7 +325,7 @@ const extractTranscriptFromPlayerPayload = async (
     const bTrack = b as CaptionTrackRecord
     const aKind = typeof aTrack.kind === 'string' ? aTrack.kind : ''
     const bKind = typeof bTrack.kind === 'string' ? bTrack.kind : ''
-    // Prefer manual captions over auto-generated (ASR)
+    // Prefer manual captions over auto-generated (ASR).
     if (aKind === 'asr' && bKind !== 'asr') {
       return 1
     }
@@ -343,6 +343,7 @@ const extractTranscriptFromPlayerPayload = async (
     return 0
   })
 
+  // De-dupe after sorting so manual/English wins within each language.
   const seenLanguages = new Set<string>()
   const normalizedTracks: Record<string, unknown>[] = []
   for (const candidate of sortedTracks) {
