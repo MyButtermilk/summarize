@@ -125,6 +125,8 @@ export function finalizeExtractedLinkContent({
   description,
   siteName,
   transcriptResolution,
+  video,
+  isVideoOnly,
   diagnostics,
 }: FinalizationArguments): ExtractedLinkContent {
   const normalized = normalizeForPrompt(baseContent)
@@ -157,6 +159,8 @@ export function finalizeExtractedLinkContent({
     transcriptCharacters,
     transcriptLines,
     transcriptSource: transcriptResolution.source,
+    video,
+    isVideoOnly,
     diagnostics,
   }
 }

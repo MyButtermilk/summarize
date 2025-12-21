@@ -2,6 +2,32 @@ import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
+import JSON5 from 'json5'
+
+export type AutoRuleKind = 'text' | 'website' | 'youtube' | 'image' | 'video' | 'file'
+export type VideoMode = 'auto' | 'transcript' | 'understand'
+
+export type AutoRuleCandidate = {
+  /**
+   * Model id.
+   *
+   * - Native: `openai/...`, `google/...`, `xai/...`, `anthropic/...`
+   * - OpenRouter (forced): `openrouter/<openrouter-model-id>` (e.g. `openrouter/openai/gpt-5-nano`)
+   */
+  model: string
+  openrouterProviders?: string[]
+  score?: {
+    quality?: number
+    speed?: number
+    cost?: number
+  }
+}
+
+export type AutoRule = {
+  when?: { kind?: AutoRuleKind }
+  candidates: AutoRuleCandidate[]
+}
+
 export type SummarizeConfig = {
   /**
    * Gateway-style model id, e.g.:
@@ -10,10 +36,77 @@ export type SummarizeConfig = {
    * - google/gemini-2.0-flash
    */
   model?: string
+  auto?: {
+    rules?: AutoRule[]
+  }
+  media?: {
+    videoMode?: VideoMode
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function assertNoComments(raw: string, path: string): void {
+  let inString: '"' | "'" | null = null
+  let escaped = false
+  let line = 1
+  let col = 1
+
+  for (let i = 0; i < raw.length; i += 1) {
+    const ch = raw[i] ?? ''
+    const next = raw[i + 1] ?? ''
+
+    if (inString) {
+      if (escaped) {
+        escaped = false
+        col += 1
+        continue
+      }
+      if (ch === '\\') {
+        escaped = true
+        col += 1
+        continue
+      }
+      if (ch === inString) {
+        inString = null
+      }
+      if (ch === '\n') {
+        line += 1
+        col = 1
+      } else {
+        col += 1
+      }
+      continue
+    }
+
+    if (ch === '"' || ch === "'") {
+      inString = ch as '"' | "'"
+      escaped = false
+      col += 1
+      continue
+    }
+
+    if (ch === '/' && next === '/') {
+      throw new Error(
+        `Invalid config file ${path}: comments are not allowed (found // at ${line}:${col}).`
+      )
+    }
+
+    if (ch === '/' && next === '*') {
+      throw new Error(
+        `Invalid config file ${path}: comments are not allowed (found /* at ${line}:${col}).`
+      )
+    }
+
+    if (ch === '\n') {
+      line += 1
+      col = 1
+    } else {
+      col += 1
+    }
+  }
 }
 
 export function loadSummarizeConfig({ env }: { env: Record<string, string | undefined> }): {
@@ -32,8 +125,9 @@ export function loadSummarizeConfig({ env }: { env: Record<string, string | unde
   }
 
   let parsed: unknown
+  assertNoComments(raw, path)
   try {
-    parsed = JSON.parse(raw)
+    parsed = JSON5.parse(raw)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     throw new Error(`Invalid JSON in config file ${path}: ${message}`)
@@ -44,5 +138,62 @@ export function loadSummarizeConfig({ env }: { env: Record<string, string | unde
   }
 
   const model = typeof parsed.model === 'string' ? parsed.model : undefined
-  return { config: { model }, path }
+
+  const auto = (() => {
+    const value = parsed.auto
+    if (!isRecord(value)) return undefined
+    const rulesRaw = value.rules
+    if (!Array.isArray(rulesRaw)) return undefined
+    const rules: AutoRule[] = []
+    for (const entry of rulesRaw) {
+      if (!isRecord(entry)) continue
+      const candidatesRaw = entry.candidates
+      if (!Array.isArray(candidatesRaw) || candidatesRaw.length === 0) continue
+      const candidates: AutoRuleCandidate[] = []
+      for (const c of candidatesRaw) {
+        if (!isRecord(c)) continue
+        const modelId = typeof c.model === 'string' ? c.model : null
+        if (!modelId || modelId.trim().length === 0) continue
+        const openrouterProviders = Array.isArray(c.openrouterProviders)
+          ? c.openrouterProviders.filter((p) => typeof p === 'string' && p.trim().length > 0)
+          : undefined
+        const score = isRecord(c.score)
+          ? {
+              quality: typeof c.score.quality === 'number' ? c.score.quality : undefined,
+              speed: typeof c.score.speed === 'number' ? c.score.speed : undefined,
+              cost: typeof c.score.cost === 'number' ? c.score.cost : undefined,
+            }
+          : undefined
+        candidates.push({ model: modelId, ...(openrouterProviders ? { openrouterProviders } : {}), ...(score ? { score } : {}) })
+      }
+      if (candidates.length === 0) continue
+      const when = isRecord(entry.when)
+        ? {
+            kind:
+              entry.when.kind === 'text' ||
+              entry.when.kind === 'website' ||
+              entry.when.kind === 'youtube' ||
+              entry.when.kind === 'image' ||
+              entry.when.kind === 'video' ||
+              entry.when.kind === 'file'
+                ? (entry.when.kind as AutoRuleKind)
+                : undefined,
+          }
+        : undefined
+      rules.push({ ...(when ? { when } : {}), candidates })
+    }
+    return rules.length > 0 ? { rules } : undefined
+  })()
+
+  const media = (() => {
+    const value = parsed.media
+    if (!isRecord(value)) return undefined
+    const videoMode =
+      value.videoMode === 'auto' || value.videoMode === 'transcript' || value.videoMode === 'understand'
+        ? (value.videoMode as VideoMode)
+        : undefined
+    return videoMode ? { videoMode } : undefined
+  })()
+
+  return { config: { model, ...(auto ? { auto } : {}), ...(media ? { media } : {}) }, path }
 }

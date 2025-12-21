@@ -17,6 +17,15 @@ describe('config error handling', () => {
     )
   })
 
+  it('throws when config contains comments', () => {
+    const root = mkdtempSync(join(tmpdir(), 'summarize-config-'))
+    const configPath = join(root, '.summarize', 'config.json')
+    mkdirSync(join(root, '.summarize'), { recursive: true })
+    writeFileSync(configPath, '{\n  // no comments\n  \"model\": \"openai/gpt-5.2\"\n}\n', 'utf8')
+
+    expect(() => loadSummarizeConfig({ env: { HOME: root } })).toThrow(/comments are not allowed/i)
+  })
+
   it('throws when top-level is not an object', () => {
     const root = mkdtempSync(join(tmpdir(), 'summarize-config-'))
     const configPath = join(root, '.summarize', 'config.json')

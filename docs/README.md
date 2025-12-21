@@ -4,6 +4,7 @@
 - `docs/youtube.md` — YouTube transcript extraction (youtubei / captionTracks / Apify)
 - `docs/firecrawl.md` — Firecrawl mode + API key
 - `docs/llm.md` — LLM summarization + model config (Gateway/OpenAI)
+- `docs/model-auto.md` — automatic model selection (`--model auto`)
 - `docs/extract-only.md` — extract mode (no summary LLM call)
 
 ## Website

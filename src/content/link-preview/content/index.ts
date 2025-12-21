@@ -24,6 +24,7 @@ import {
   selectBaseContent,
 } from './utils.js'
 import { extractYouTubeShortDescription } from './youtube.js'
+import { detectPrimaryVideoFromHtml } from './video.js'
 
 const LEADING_CONTROL_PATTERN = /^[\\s\\p{Cc}]+/u
 const BLOCKED_HTML_HINT_PATTERN =
@@ -206,6 +207,8 @@ export async function fetchLinkContent(
         description,
         siteName,
         transcriptResolution,
+        video: null,
+        isVideoOnly: false,
         diagnostics: {
           strategy: 'bird',
           firecrawl: firecrawlDiagnostics,
@@ -410,6 +413,12 @@ async function buildResultFromFirecrawl({
     cacheMode ?? 'default'
   )
 
+  const video = payload.html ? detectPrimaryVideoFromHtml(payload.html, url) : null
+  const isVideoOnly =
+    !transcriptResolution.text &&
+    normalizedMarkdown.length < MIN_HTML_CONTENT_CHARACTERS &&
+    video !== null
+
   return finalizeExtractedLinkContent({
     url,
     baseContent,
@@ -418,6 +427,8 @@ async function buildResultFromFirecrawl({
     description,
     siteName,
     transcriptResolution,
+    video,
+    isVideoOnly,
     diagnostics: {
       strategy: 'firecrawl',
       firecrawl: firecrawlDiagnostics,
@@ -533,6 +544,10 @@ async function buildResultFromHtmlDocument({
     }
   })()
 
+  const video = detectPrimaryVideoFromHtml(html, url)
+  const isVideoOnly =
+    !transcriptResolution.text && baseContent.length < MIN_HTML_CONTENT_CHARACTERS && video !== null
+
   return finalizeExtractedLinkContent({
     url,
     baseContent,
@@ -541,6 +556,8 @@ async function buildResultFromHtmlDocument({
     description,
     siteName,
     transcriptResolution,
+    video,
+    isVideoOnly,
     diagnostics: {
       strategy: 'html',
       firecrawl: firecrawlDiagnostics,

@@ -8,6 +8,7 @@ export type PreprocessMode = 'off' | 'auto' | 'always'
 export type StreamMode = 'auto' | 'on' | 'off'
 export type RenderMode = 'auto' | 'md' | 'md-live' | 'plain'
 export type MetricsMode = 'off' | 'on' | 'detailed'
+export type VideoMode = 'auto' | 'transcript' | 'understand'
 
 export type LengthArg =
   | { kind: 'preset'; preset: SummaryLength }
@@ -77,6 +78,14 @@ export function parseMetricsMode(raw: string): MetricsMode {
     return normalized as MetricsMode
   }
   throw new Error(`Unsupported --metrics: ${raw}`)
+}
+
+export function parseVideoMode(raw: string): VideoMode {
+  const normalized = raw.trim().toLowerCase()
+  if (normalized === 'auto' || normalized === 'transcript' || normalized === 'understand') {
+    return normalized as VideoMode
+  }
+  throw new Error(`Unsupported --video-mode: ${raw}`)
 }
 
 export function parseDurationMs(raw: string): number {

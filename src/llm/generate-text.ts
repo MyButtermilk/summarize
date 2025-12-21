@@ -110,21 +110,25 @@ function resolveOpenAiClientConfig({
   apiKeys,
   openrouter,
   fetchImpl,
+  forceOpenRouter,
 }: {
   apiKeys: LlmApiKeys
   openrouter?: OpenRouterOptions
   fetchImpl: typeof fetch
+  forceOpenRouter?: boolean
 }): OpenAiClientConfig {
   const baseUrlRaw = typeof process !== 'undefined' ? process.env.OPENAI_BASE_URL : undefined
   const baseUrl =
     typeof baseUrlRaw === 'string' && baseUrlRaw.trim().length > 0 ? baseUrlRaw.trim() : null
   const isOpenRouterViaBaseUrl = baseUrl ? /openrouter\.ai/i.test(baseUrl) : false
   const hasOpenRouterKey = apiKeys.openrouterApiKey != null
-  const isOpenRouter = isOpenRouterViaBaseUrl || (hasOpenRouterKey && !baseUrl)
+  const hasOpenAiKey = apiKeys.openaiApiKey != null
+  const isOpenRouter =
+    Boolean(forceOpenRouter) ||
+    isOpenRouterViaBaseUrl ||
+    (hasOpenRouterKey && !baseUrl && !hasOpenAiKey)
 
-  const apiKey = isOpenRouter
-    ? (apiKeys.openrouterApiKey ?? apiKeys.openaiApiKey)
-    : apiKeys.openaiApiKey
+  const apiKey = isOpenRouter ? apiKeys.openrouterApiKey ?? apiKeys.openaiApiKey : apiKeys.openaiApiKey
   if (!apiKey) {
     throw new Error(
       isOpenRouter
@@ -145,7 +149,9 @@ function resolveOpenAiClientConfig({
         }
       : fetchImpl
 
-  const baseURL = baseUrl ?? (isOpenRouter ? 'https://openrouter.ai/api/v1' : undefined)
+  const baseURL = forceOpenRouter
+    ? 'https://openrouter.ai/api/v1'
+    : baseUrl ?? (isOpenRouter ? 'https://openrouter.ai/api/v1' : undefined)
 
   return {
     apiKey,
@@ -166,6 +172,7 @@ export async function generateTextWithModelId({
   timeoutMs,
   fetchImpl,
   openrouter,
+  forceOpenRouter,
   retries = 0,
   onRetry,
 }: {
@@ -178,6 +185,7 @@ export async function generateTextWithModelId({
   timeoutMs: number
   fetchImpl: typeof fetch
   openrouter?: OpenRouterOptions
+  forceOpenRouter?: boolean
   retries?: number
   onRetry?: (notice: RetryNotice) => void
 }): Promise<{
@@ -347,6 +355,7 @@ export async function streamTextWithModelId({
   timeoutMs,
   fetchImpl,
   openrouter,
+  forceOpenRouter,
 }: {
   modelId: string
   apiKeys: LlmApiKeys
@@ -357,6 +366,7 @@ export async function streamTextWithModelId({
   timeoutMs: number
   fetchImpl: typeof fetch
   openrouter?: OpenRouterOptions
+  forceOpenRouter?: boolean
 }): Promise<{
   textStream: AsyncIterable<string>
   canonicalModelId: string
@@ -516,7 +526,7 @@ export async function streamTextWithModelId({
     }
 
     const { createOpenAI } = await import('@ai-sdk/openai')
-    const openaiConfig = resolveOpenAiClientConfig({ apiKeys, openrouter, fetchImpl })
+    const openaiConfig = resolveOpenAiClientConfig({ apiKeys, openrouter, fetchImpl, forceOpenRouter })
     const openai = createOpenAI({
       apiKey: openaiConfig.apiKey,
       ...(openaiConfig.baseURL ? { baseURL: openaiConfig.baseURL } : {}),

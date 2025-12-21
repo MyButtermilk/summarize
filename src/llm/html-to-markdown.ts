@@ -39,6 +39,7 @@ ${html}
 
 export function createHtmlToMarkdownConverter({
   modelId,
+  forceOpenRouter,
   xaiApiKey,
   googleApiKey,
   openaiApiKey,
@@ -51,6 +52,7 @@ export function createHtmlToMarkdownConverter({
   onUsage,
 }: {
   modelId: string
+  forceOpenRouter?: boolean
   xaiApiKey: string | null
   googleApiKey: string | null
   openaiApiKey: string | null
@@ -80,6 +82,7 @@ export function createHtmlToMarkdownConverter({
       modelId,
       apiKeys: { xaiApiKey, googleApiKey, openaiApiKey, anthropicApiKey, openrouterApiKey },
       openrouter,
+      forceOpenRouter,
       system,
       prompt,
       timeoutMs,

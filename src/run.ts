@@ -8,6 +8,8 @@ import { countTokens } from 'gpt-tokenizer'
 import { createLiveRenderer, render as renderMarkdownAnsi } from 'markdansi'
 import { normalizeTokenUsage, tallyCosts } from 'tokentally'
 import { loadSummarizeConfig } from './config.js'
+import { buildAutoModelAttempts } from './model-auto.js'
+import { parseRequestedModelId, type FixedModelSpec, type RequestedModel } from './model-spec.js'
 import {
   buildAssetPromptMessages,
   classifyUrl,
@@ -32,6 +34,7 @@ import {
   parseRenderMode,
   parseStreamMode,
   parseYoutubeMode,
+  parseVideoMode,
 } from './flags.js'
 import { generateTextWithModelId, streamTextWithModelId } from './llm/generate-text.js'
 import { resolveGoogleModelForUsage } from './llm/google-models.js'
@@ -253,6 +256,14 @@ function buildProgram() {
       'YouTube transcript source: auto, web (youtubei/captionTracks), yt-dlp (audio+whisper), apify',
       'auto'
     )
+    .addOption(
+      new Option(
+        '--video-mode <mode>',
+        'Video handling: auto (prefer video understanding if supported), transcript, understand.'
+      )
+        .choices(['auto', 'transcript', 'understand'])
+        .default('auto')
+    )
     .option(
       '--firecrawl <mode>',
       'Firecrawl usage: off, auto (fallback), always (try Firecrawl first). Note: in --format md website mode, defaults to always when FIRECRAWL_API_KEY is set (unless --firecrawl is set explicitly).',
@@ -301,7 +312,7 @@ function buildProgram() {
     .option('--retries <count>', 'LLM retry attempts on timeout (default: 1).', '1')
     .option(
       '--model <model>',
-      'LLM model id (gateway-style): xai/..., openai/..., google/... (default: google/gemini-3-flash-preview)',
+      'LLM model id: auto, xai/..., openai/..., google/..., anthropic/... or openrouter/<author>/<slug> (default: google/gemini-3-flash-preview)',
       undefined
     )
     .option('--extract', 'Print extracted content and exit (no LLM summary)', false)
@@ -638,6 +649,7 @@ async function summarizeWithModelId({
   fetchImpl,
   apiKeys,
   openrouter,
+  forceOpenRouter,
   retries,
   onRetry,
 }: {
@@ -654,6 +666,7 @@ async function summarizeWithModelId({
     openrouterApiKey: string | null
   }
   openrouter?: { providers: string[] | null }
+  forceOpenRouter?: boolean
   retries: number
   onRetry?: (notice: { attempt: number; maxRetries: number; delayMs: number; error: unknown }) => void
 }): Promise<{
@@ -666,6 +679,7 @@ async function summarizeWithModelId({
     modelId,
     apiKeys,
     openrouter,
+    forceOpenRouter,
     prompt,
     temperature: 0,
     maxOutputTokens,
@@ -907,6 +921,9 @@ export async function runCli(
   const runStartedAtMs = Date.now()
 
   const youtubeMode = parseYoutubeMode(program.opts().youtube as string)
+  const videoModeExplicitlySet = normalizedArgv.some(
+    (arg) => arg === '--video-mode' || arg.startsWith('--video-mode=')
+  )
   const lengthArg = parseLengthArg(program.opts().length as string)
   const maxOutputTokensArg = parseMaxOutputTokensArg(
     program.opts().maxOutputTokens as string | undefined
@@ -950,6 +967,11 @@ export async function runCli(
     typeof program.opts().model === 'string' ? (program.opts().model as string) : null
 
   const { config, path: configPath } = loadSummarizeConfig({ env })
+  const videoMode = parseVideoMode(
+    videoModeExplicitlySet
+      ? (program.opts().videoMode as string)
+      : (config?.media?.videoMode ?? (program.opts().videoMode as string))
+  )
 
   const xaiKeyRaw = typeof env.XAI_API_KEY === 'string' ? env.XAI_API_KEY : null
   const openaiBaseUrl = typeof env.OPENAI_BASE_URL === 'string' ? env.OPENAI_BASE_URL : null
@@ -1105,8 +1127,11 @@ export async function runCli(
     return 'google/gemini-3-flash-preview'
   })()
 
-  const model = normalizeGatewayStyleModelId((modelArg?.trim() ?? '') || resolvedDefaultModel)
-  const parsedModelForLlm = parseGatewayStyleModelId(model)
+  const requestedModel: RequestedModel = parseRequestedModelId(
+    ((modelArg?.trim() ?? '') || resolvedDefaultModel).trim()
+  )
+  const requestedModelLabel =
+    requestedModel.kind === 'auto' ? 'auto' : requestedModel.userModelId
 
   const verboseColor = supportsColor(stderr, env)
   const effectiveStreamMode = (() => {
@@ -1151,44 +1176,74 @@ export async function runCli(
     fn?.()
   }
 
-  const summarizeAsset = async ({
-    sourceKind,
-    sourceLabel,
-    attachment,
+  const fixedModelSpec: FixedModelSpec | null =
+    requestedModel.kind === 'fixed'
+      ? {
+          ...requestedModel,
+          openrouterProviders:
+            requestedModel.transport === 'openrouter' ? openRouterProviders : null,
+        }
+      : null
+
+  const desiredOutputTokens = (() => {
+    if (typeof maxOutputTokensArg === 'number') return maxOutputTokensArg
+    const targetChars = resolveTargetCharacters(lengthArg)
+    if (!Number.isFinite(targetChars) || targetChars <= 0 || targetChars === Number.POSITIVE_INFINITY) {
+      return null
+    }
+    // Rough heuristic; used only for the "skip model when input is shorter than requested output" rule.
+    return Math.max(16, Math.ceil(targetChars / 4))
+  })()
+
+  type ModelAttempt = {
+    userModelId: string
+    llmModelId: string
+    openrouterProviders: string[] | null
+    forceOpenRouter: boolean
+    requiredEnv: 'XAI_API_KEY' | 'OPENAI_API_KEY' | 'GEMINI_API_KEY' | 'ANTHROPIC_API_KEY' | 'OPENROUTER_API_KEY'
+  }
+
+  const envHasKeyFor = (requiredEnv: ModelAttempt['requiredEnv']) => {
+    if (requiredEnv === 'GEMINI_API_KEY') {
+      return googleConfigured
+    }
+    if (requiredEnv === 'OPENROUTER_API_KEY') {
+      return openrouterConfigured
+    }
+    if (requiredEnv === 'OPENAI_API_KEY') {
+      return Boolean(apiKey)
+    }
+    if (requiredEnv === 'XAI_API_KEY') {
+      return Boolean(xaiApiKey)
+    }
+    return Boolean(anthropicApiKey)
+  }
+
+  const runSummaryAttempt = async ({
+    attempt,
+    prompt,
+    allowStreaming,
+    onModelChosen,
   }: {
-    sourceKind: 'file' | 'asset-url'
-    sourceLabel: string
-    attachment: Awaited<ReturnType<typeof loadLocalAsset>>['attachment']
-  }) => {
-    const parsedModel = parseGatewayStyleModelId(model)
+    attempt: ModelAttempt
+    prompt: string | ModelMessage[]
+    allowStreaming: boolean
+    onModelChosen?: ((modelId: string) => void) | null
+  }): Promise<{
+    summary: string
+    summaryAlreadyPrinted: boolean
+    parsedModelEffective: ReturnType<typeof parseGatewayStyleModelId>
+    maxOutputTokensForCall: number | null
+  }> => {
+    onModelChosen?.(attempt.userModelId)
+
+    const parsedModel = parseGatewayStyleModelId(attempt.llmModelId)
     const apiKeysForLlm = {
       xaiApiKey,
       openaiApiKey: apiKey,
       googleApiKey: googleConfigured ? googleApiKey : null,
       anthropicApiKey: anthropicConfigured ? anthropicApiKey : null,
       openrouterApiKey: openrouterConfigured ? openrouterApiKey : null,
-    }
-
-    const requiredKeyEnv =
-      parsedModel.provider === 'xai'
-        ? 'XAI_API_KEY'
-        : parsedModel.provider === 'google'
-          ? 'GEMINI_API_KEY (or GOOGLE_GENERATIVE_AI_API_KEY / GOOGLE_API_KEY)'
-          : parsedModel.provider === 'anthropic'
-            ? 'ANTHROPIC_API_KEY'
-            : 'OPENAI_API_KEY (or OPENROUTER_API_KEY)'
-    const hasRequiredKey =
-      parsedModel.provider === 'xai'
-        ? Boolean(xaiApiKey)
-        : parsedModel.provider === 'google'
-          ? googleConfigured
-          : parsedModel.provider === 'anthropic'
-            ? anthropicConfigured
-            : Boolean(apiKey) || openrouterConfigured
-    if (!hasRequiredKey) {
-      throw new Error(
-        `Missing ${requiredKeyEnv} for model ${parsedModel.canonical}. Set the env var or choose a different --model.`
-      )
     }
 
     const modelResolution = await resolveModelIdForLlmCall({
@@ -1200,13 +1255,269 @@ export async function runCli(
     if (modelResolution.note && verbose) {
       writeVerbose(stderr, verbose, modelResolution.note, verboseColor)
     }
-    const effectiveModelId = modelResolution.modelId
-    const parsedModelEffective = parseGatewayStyleModelId(effectiveModelId)
-    const streamingEnabledForCall = streamingEnabled && !modelResolution.forceStreamOff
+    const parsedModelEffective = parseGatewayStyleModelId(modelResolution.modelId)
+    const streamingEnabledForCall = allowStreaming && streamingEnabled && !modelResolution.forceStreamOff
 
-    const maxOutputTokensForCall = await resolveMaxOutputTokensForCall(
-      parsedModelEffective.canonical
-    )
+    const maxOutputTokensForCall = await resolveMaxOutputTokensForCall(parsedModelEffective.canonical)
+    const maxInputTokensForCall = await resolveMaxInputTokensForCall(parsedModelEffective.canonical)
+    if (
+      typeof maxInputTokensForCall === 'number' &&
+      Number.isFinite(maxInputTokensForCall) &&
+      maxInputTokensForCall > 0 &&
+      typeof prompt === 'string'
+    ) {
+      const tokenCount = countTokens(prompt)
+      if (tokenCount > maxInputTokensForCall) {
+        throw new Error(
+          `Input token count (${formatCount(tokenCount)}) exceeds model input limit (${formatCount(maxInputTokensForCall)}). Tokenized with GPT tokenizer; prompt included.`
+        )
+      }
+    }
+
+    const openrouterForAttempt = attempt.forceOpenRouter
+      ? { providers: attempt.openrouterProviders }
+      : openrouterOptions
+
+    if (!streamingEnabledForCall) {
+      const result = await summarizeWithModelId({
+        modelId: parsedModelEffective.canonical,
+        prompt,
+        maxOutputTokens: maxOutputTokensForCall ?? undefined,
+        timeoutMs,
+        fetchImpl: trackedFetch,
+        apiKeys: apiKeysForLlm,
+        openrouter: openrouterForAttempt,
+        forceOpenRouter: attempt.forceOpenRouter,
+        retries,
+        onRetry: createRetryLogger({
+          stderr,
+          verbose,
+          color: verboseColor,
+          modelId: parsedModelEffective.canonical,
+        }),
+      })
+      llmCalls.push({
+        provider: result.provider,
+        model: result.canonicalModelId,
+        usage: result.usage,
+        purpose: 'summary',
+      })
+      const summary = result.text.trim()
+      if (!summary) throw new Error('LLM returned an empty summary')
+      return {
+        summary,
+        summaryAlreadyPrinted: false,
+        parsedModelEffective,
+        maxOutputTokensForCall: maxOutputTokensForCall ?? null,
+      }
+    }
+
+    const shouldBufferSummaryForRender =
+      streamingEnabledForCall && effectiveRenderMode === 'md' && isRichTty(stdout)
+    const shouldLiveRenderSummary =
+      streamingEnabledForCall && effectiveRenderMode === 'md-live' && isRichTty(stdout)
+    const shouldStreamSummaryToStdout =
+      streamingEnabledForCall && !shouldBufferSummaryForRender && !shouldLiveRenderSummary
+
+    let summaryAlreadyPrinted = false
+    let summary = ''
+    let getLastStreamError: (() => unknown) | null = null
+
+    let streamResult: Awaited<ReturnType<typeof streamTextWithModelId>> | null = null
+    try {
+      streamResult = await streamTextWithModelId({
+        modelId: parsedModelEffective.canonical,
+        apiKeys: apiKeysForLlm,
+        openrouter: openrouterForAttempt,
+        forceOpenRouter: attempt.forceOpenRouter,
+        prompt,
+        temperature: 0,
+        maxOutputTokens: maxOutputTokensForCall ?? undefined,
+        timeoutMs,
+        fetchImpl: trackedFetch,
+      })
+    } catch (error) {
+      if (isStreamingTimeoutError(error)) {
+        writeVerbose(
+          stderr,
+          verbose,
+          `Streaming timed out for ${parsedModelEffective.canonical}; falling back to non-streaming.`,
+          verboseColor
+        )
+        const result = await summarizeWithModelId({
+          modelId: parsedModelEffective.canonical,
+          prompt,
+          maxOutputTokens: maxOutputTokensForCall ?? undefined,
+          timeoutMs,
+          fetchImpl: trackedFetch,
+          apiKeys: apiKeysForLlm,
+          openrouter: openrouterForAttempt,
+          forceOpenRouter: attempt.forceOpenRouter,
+          retries,
+          onRetry: createRetryLogger({
+            stderr,
+            verbose,
+            color: verboseColor,
+            modelId: parsedModelEffective.canonical,
+          }),
+        })
+        llmCalls.push({
+          provider: result.provider,
+          model: result.canonicalModelId,
+          usage: result.usage,
+          purpose: 'summary',
+        })
+        summary = result.text
+        streamResult = null
+      } else if (parsedModelEffective.provider === 'google' && isGoogleStreamingUnsupportedError(error)) {
+        writeVerbose(
+          stderr,
+          verbose,
+          `Google model ${parsedModelEffective.canonical} rejected streamGenerateContent; falling back to non-streaming.`,
+          verboseColor
+        )
+        const result = await summarizeWithModelId({
+          modelId: parsedModelEffective.canonical,
+          prompt,
+          maxOutputTokens: maxOutputTokensForCall ?? undefined,
+          timeoutMs,
+          fetchImpl: trackedFetch,
+          apiKeys: apiKeysForLlm,
+          openrouter: openrouterForAttempt,
+          forceOpenRouter: attempt.forceOpenRouter,
+          retries,
+          onRetry: createRetryLogger({
+            stderr,
+            verbose,
+            color: verboseColor,
+            modelId: parsedModelEffective.canonical,
+          }),
+        })
+        llmCalls.push({
+          provider: result.provider,
+          model: result.canonicalModelId,
+          usage: result.usage,
+          purpose: 'summary',
+        })
+        summary = result.text
+        streamResult = null
+      } else {
+        throw error
+      }
+    }
+
+    if (streamResult) {
+      getLastStreamError = streamResult.lastError
+      let streamed = ''
+      const liveRenderer = shouldLiveRenderSummary
+        ? createLiveRenderer({
+            write: (chunk) => {
+              clearProgressForStdout()
+              stdout.write(chunk)
+            },
+            width: markdownRenderWidth(stdout, env),
+            renderFrame: (markdown) =>
+              renderMarkdownAnsi(markdown, {
+                width: markdownRenderWidth(stdout, env),
+                wrap: true,
+                color: supportsColor(stdout, env),
+              }),
+          })
+        : null
+      let lastFrameAtMs = 0
+      try {
+        let cleared = false
+        for await (const delta of streamResult.textStream) {
+          const merged = mergeStreamingChunk(streamed, delta)
+          streamed = merged.next
+          if (shouldStreamSummaryToStdout) {
+            if (!cleared) {
+              clearProgressForStdout()
+              cleared = true
+            }
+            if (merged.appended) stdout.write(merged.appended)
+            continue
+          }
+
+          if (liveRenderer) {
+            const now = Date.now()
+            const due = now - lastFrameAtMs >= 120
+            const hasNewline = delta.includes('\n')
+            if (hasNewline || due) {
+              liveRenderer.render(streamed)
+              lastFrameAtMs = now
+            }
+          }
+        }
+
+        const trimmed = streamed.trim()
+        streamed = trimmed
+        if (liveRenderer) {
+          liveRenderer.render(trimmed)
+          summaryAlreadyPrinted = true
+        }
+      } finally {
+        liveRenderer?.finish()
+      }
+      const usage = await streamResult.usage
+      llmCalls.push({
+        provider: streamResult.provider,
+        model: streamResult.canonicalModelId,
+        usage,
+        purpose: 'summary',
+      })
+      summary = streamed
+      if (shouldStreamSummaryToStdout) {
+        if (!streamed.endsWith('\n')) {
+          stdout.write('\n')
+        }
+        summaryAlreadyPrinted = true
+      }
+    }
+
+    summary = summary.trim()
+    if (summary.length === 0) {
+      const last = getLastStreamError?.()
+      if (last instanceof Error) {
+        throw new Error(last.message, { cause: last })
+      }
+      throw new Error('LLM returned an empty summary')
+    }
+
+    return {
+      summary,
+      summaryAlreadyPrinted,
+      parsedModelEffective,
+      maxOutputTokensForCall: maxOutputTokensForCall ?? null,
+    }
+  }
+
+  const writeViaFooter = (parts: string[]) => {
+    if (json) return
+    const filtered = parts.map((p) => p.trim()).filter(Boolean)
+    if (filtered.length === 0) return
+    clearProgressForStdout()
+    stderr.write(`${ansi('2', `via ${filtered.join(', ')}`, verboseColor)}\n`)
+  }
+
+  const summarizeAsset = async ({
+    sourceKind,
+    sourceLabel,
+    attachment,
+    onModelChosen,
+  }: {
+    sourceKind: 'file' | 'asset-url'
+    sourceLabel: string
+    attachment: Awaited<ReturnType<typeof loadLocalAsset>>['attachment']
+    onModelChosen?: ((modelId: string) => void) | null
+  }) => {
+    const apiKeysForLlm = {
+      xaiApiKey,
+      openaiApiKey: apiKey,
+      googleApiKey: googleConfigured ? googleApiKey : null,
+      anthropicApiKey: anthropicConfigured ? anthropicApiKey : null,
+      openrouterApiKey: openrouterConfigured ? openrouterApiKey : null,
+    }
     const textContent = getTextContentFromAttachment(attachment)
     if (textContent && textContent.bytes > MAX_TEXT_BYTES_DEFAULT) {
       throw new Error(
@@ -1227,6 +1538,7 @@ export async function runCli(
       lengthArg.kind === 'preset' ? lengthArg.preset : { maxCharacters: lengthArg.maxCharacters }
 
     let promptText = ''
+    const assetFooterParts: string[] = []
 
     const buildAttachmentPromptPayload = () => {
       promptText = buildFileSummaryPrompt({
@@ -1278,6 +1590,7 @@ export async function runCli(
         )
       }
       usingPreprocessedMarkdown = true
+      assetFooterParts.push(`markitdown(${attachment.mediaType})`)
     }
 
     let promptPayload: string | Array<ModelMessage> = buildAttachmentPromptPayload()
@@ -1288,18 +1601,18 @@ export async function runCli(
       promptPayload = buildMarkitdownPromptPayload(preprocessedMarkdown)
     }
 
-    if (!usingPreprocessedMarkdown) {
+    if (!usingPreprocessedMarkdown && fixedModelSpec && preprocessMode !== 'off') {
+      const fixedParsed = parseGatewayStyleModelId(fixedModelSpec.llmModelId)
       try {
         assertProviderSupportsAttachment({
-          provider: parsedModel.provider,
-          modelId: parsedModel.canonical,
+          provider: fixedParsed.provider,
+          modelId: fixedModelSpec.userModelId,
           attachment: { part: attachment.part, mediaType: attachment.mediaType },
         })
       } catch (error) {
         if (!canPreprocessWithMarkitdown) {
           if (
             format === 'markdown' &&
-            preprocessMode !== 'off' &&
             attachment.part.type === 'file' &&
             shouldMarkitdownConvertMediaType(attachment.mediaType) &&
             !hasUvxCli(env)
@@ -1337,249 +1650,126 @@ export async function runCli(
           )
         }
         usingPreprocessedMarkdown = true
+        assetFooterParts.push(`markitdown(${attachment.mediaType})`)
         promptPayload = buildMarkitdownPromptPayload(preprocessedMarkdown)
       }
     }
-    const maxInputTokensForCall = await resolveMaxInputTokensForCall(parsedModelEffective.canonical)
-    if (
-      typeof maxInputTokensForCall === 'number' &&
-      Number.isFinite(maxInputTokensForCall) &&
-      maxInputTokensForCall > 0 &&
-      typeof promptPayload === 'string'
-    ) {
-      const tokenCount = countTokens(promptPayload)
-      if (tokenCount > maxInputTokensForCall) {
+
+    const promptTokensForAuto = typeof promptPayload === 'string' ? countTokens(promptPayload) : null
+    const kind =
+      attachment.mediaType.toLowerCase().startsWith('video/')
+        ? ('video' as const)
+        : textContent
+          ? ('text' as const)
+          : ('file' as const)
+    const requiresVideoUnderstanding = kind === 'video' && videoMode !== 'transcript'
+
+    const attempts: ModelAttempt[] = await (async () => {
+      if (requestedModel.kind === 'auto') {
+        const catalog = await getLiteLlmCatalog()
+        const all = buildAutoModelAttempts({
+          kind,
+          promptTokens: promptTokensForAuto,
+          desiredOutputTokens,
+          requiresVideoUnderstanding,
+          env,
+          config,
+          catalog,
+          openrouterProvidersFromEnv: openRouterProviders,
+        })
+        const filtered = all.filter((a) => {
+          const parsed = parseGatewayStyleModelId(a.llmModelId)
+          if (
+            parsed.provider === 'xai' &&
+            attachment.part.type === 'file' &&
+            !isTextLikeMediaType(attachment.mediaType)
+          ) {
+            return false
+          }
+          return true
+        })
+        return filtered
+      }
+      if (!fixedModelSpec) {
+        throw new Error('Internal error: missing fixed model spec')
+      }
+      return [
+        {
+          userModelId: fixedModelSpec.userModelId,
+          llmModelId: fixedModelSpec.llmModelId,
+          openrouterProviders: fixedModelSpec.openrouterProviders,
+          forceOpenRouter: fixedModelSpec.forceOpenRouter,
+          requiredEnv: fixedModelSpec.requiredEnv,
+        },
+      ]
+    })()
+
+    let summaryResult:
+      | {
+          summary: string
+          summaryAlreadyPrinted: boolean
+          parsedModelEffective: ReturnType<typeof parseGatewayStyleModelId>
+          maxOutputTokensForCall: number | null
+        }
+      | null = null
+    let usedAttempt: ModelAttempt | null = null
+    let lastError: unknown = null
+
+    for (const attempt of attempts) {
+      const hasKey = envHasKeyFor(attempt.requiredEnv)
+      if (!hasKey) {
+        if (requestedModel.kind === 'auto') {
+          writeVerbose(stderr, verbose, `auto skip ${attempt.userModelId}: missing ${attempt.requiredEnv}`, verboseColor)
+          continue
+        }
         throw new Error(
-          `Input token count (${formatCount(tokenCount)}) exceeds model input limit (${formatCount(maxInputTokensForCall)}). Tokenized with GPT tokenizer; prompt included.`
+          `Missing ${attempt.requiredEnv} for model ${attempt.userModelId}. Set the env var or choose a different --model.`
+        )
+      }
+
+      try {
+        summaryResult = await runSummaryAttempt({
+          attempt,
+          prompt: promptPayload,
+          allowStreaming: requestedModel.kind !== 'auto',
+          onModelChosen: onModelChosen ?? null,
+        })
+        usedAttempt = attempt
+        break
+      } catch (error) {
+        lastError = error
+        if (requestedModel.kind !== 'auto') {
+          if (isUnsupportedAttachmentError(error)) {
+            throw new Error(
+              `Model ${attempt.userModelId} does not support attaching files of type ${attachment.mediaType}. Try a different --model.`,
+              { cause: error }
+            )
+          }
+          throw error
+        }
+        writeVerbose(
+          stderr,
+          verbose,
+          `auto failed ${attempt.userModelId}: ${error instanceof Error ? error.message : String(error)}`,
+          verboseColor
         )
       }
     }
 
-    const shouldBufferSummaryForRender =
-      streamingEnabledForCall && effectiveRenderMode === 'md' && isRichTty(stdout)
-    const shouldLiveRenderSummary =
-      streamingEnabledForCall && effectiveRenderMode === 'md-live' && isRichTty(stdout)
-    const shouldStreamSummaryToStdout =
-      streamingEnabledForCall && !shouldBufferSummaryForRender && !shouldLiveRenderSummary
-
-    let summaryAlreadyPrinted = false
-    let summary = ''
-    let getLastStreamError: (() => unknown) | null = null
-
-    if (streamingEnabledForCall) {
-      let streamResult: Awaited<ReturnType<typeof streamTextWithModelId>> | null = null
-      try {
-        streamResult = await streamTextWithModelId({
-          modelId: parsedModelEffective.canonical,
-          apiKeys: apiKeysForLlm,
-          openrouter: openrouterOptions,
-          prompt: promptPayload,
-          temperature: 0,
-          maxOutputTokens: maxOutputTokensForCall ?? undefined,
-          timeoutMs,
-          fetchImpl: trackedFetch,
-        })
-      } catch (error) {
-        if (isStreamingTimeoutError(error)) {
-          writeVerbose(
-            stderr,
-            verbose,
-            `Streaming timed out for ${parsedModelEffective.canonical}; falling back to non-streaming.`,
-            verboseColor
-          )
-          const result = await summarizeWithModelId({
-            modelId: parsedModelEffective.canonical,
-            prompt: promptPayload,
-            maxOutputTokens: maxOutputTokensForCall ?? undefined,
-            timeoutMs,
-            fetchImpl: trackedFetch,
-            apiKeys: apiKeysForLlm,
-            openrouter: openrouterOptions,
-            retries,
-            onRetry: createRetryLogger({
-              stderr,
-              verbose,
-              color: verboseColor,
-              modelId: parsedModelEffective.canonical,
-            }),
-          })
-          llmCalls.push({
-            provider: result.provider,
-            model: result.canonicalModelId,
-            usage: result.usage,
-            purpose: 'summary',
-          })
-          summary = result.text
-          streamResult = null
-        } else if (
-          parsedModelEffective.provider === 'google' &&
-          isGoogleStreamingUnsupportedError(error)
-        ) {
-          writeVerbose(
-            stderr,
-            verbose,
-            `Google model ${parsedModelEffective.canonical} rejected streamGenerateContent; falling back to non-streaming.`,
-            verboseColor
-          )
-          const result = await summarizeWithModelId({
-            modelId: parsedModelEffective.canonical,
-            prompt: promptPayload,
-            maxOutputTokens: maxOutputTokensForCall ?? undefined,
-            timeoutMs,
-            fetchImpl: trackedFetch,
-            apiKeys: apiKeysForLlm,
-            openrouter: openrouterOptions,
-            retries,
-            onRetry: createRetryLogger({
-              stderr,
-              verbose,
-              color: verboseColor,
-              modelId: parsedModelEffective.canonical,
-            }),
-          })
-          llmCalls.push({
-            provider: result.provider,
-            model: result.canonicalModelId,
-            usage: result.usage,
-            purpose: 'summary',
-          })
-          summary = result.text
-          streamResult = null
-        } else if (isUnsupportedAttachmentError(error)) {
-          throw new Error(
-            `Model ${parsedModel.canonical} does not support attaching files of type ${attachment.mediaType}. Try a different --model (e.g. google/gemini-3-flash-preview).`,
-            { cause: error }
-          )
-        } else {
-          throw error
+    if (!summaryResult || !usedAttempt) {
+      if (textContent) {
+        clearProgressForStdout()
+        stdout.write(`${textContent.content.trim()}\n`)
+        if (assetFooterParts.length > 0) {
+          writeViaFooter([...assetFooterParts, 'no model'])
         }
+        return
       }
-
-      if (streamResult) {
-        getLastStreamError = streamResult.lastError
-        let streamed = ''
-        const liveRenderer = shouldLiveRenderSummary
-          ? createLiveRenderer({
-              write: (chunk) => {
-                clearProgressForStdout()
-                stdout.write(chunk)
-              },
-              width: markdownRenderWidth(stdout, env),
-              renderFrame: (markdown) =>
-                renderMarkdownAnsi(markdown, {
-                  width: markdownRenderWidth(stdout, env),
-                  wrap: true,
-                  color: supportsColor(stdout, env),
-                }),
-            })
-          : null
-        let lastFrameAtMs = 0
-        try {
-          try {
-            let cleared = false
-            for await (const delta of streamResult.textStream) {
-              if (!cleared) {
-                clearProgressForStdout()
-                cleared = true
-              }
-              const merged = mergeStreamingChunk(streamed, delta)
-              streamed = merged.next
-              if (shouldStreamSummaryToStdout) {
-                if (merged.appended) stdout.write(merged.appended)
-                continue
-              }
-
-              if (liveRenderer) {
-                const now = Date.now()
-                const due = now - lastFrameAtMs >= 120
-                const hasNewline = delta.includes('\n')
-                if (hasNewline || due) {
-                  liveRenderer.render(streamed)
-                  lastFrameAtMs = now
-                }
-              }
-            }
-          } catch (error) {
-            if (isUnsupportedAttachmentError(error)) {
-              throw new Error(
-                `Model ${parsedModel.canonical} does not support attaching files of type ${attachment.mediaType}. Try a different --model (e.g. google/gemini-3-flash-preview).`,
-                { cause: error }
-              )
-            }
-            throw error
-          }
-
-          const trimmed = streamed.trim()
-          streamed = trimmed
-          if (liveRenderer) {
-            liveRenderer.render(trimmed)
-            summaryAlreadyPrinted = true
-          }
-        } finally {
-          liveRenderer?.finish()
-        }
-
-        const usage = await streamResult.usage
-        llmCalls.push({
-          provider: streamResult.provider,
-          model: streamResult.canonicalModelId,
-          usage,
-          purpose: 'summary',
-        })
-        summary = streamed
-
-        if (shouldStreamSummaryToStdout) {
-          if (!streamed.endsWith('\n')) {
-            stdout.write('\n')
-          }
-          summaryAlreadyPrinted = true
-        }
-      }
-    } else {
-      let result: Awaited<ReturnType<typeof summarizeWithModelId>>
-      try {
-        result = await summarizeWithModelId({
-          modelId: parsedModelEffective.canonical,
-          prompt: promptPayload,
-          maxOutputTokens: maxOutputTokensForCall ?? undefined,
-          timeoutMs,
-          fetchImpl: trackedFetch,
-          apiKeys: apiKeysForLlm,
-          openrouter: openrouterOptions,
-          retries,
-          onRetry: createRetryLogger({
-            stderr,
-            verbose,
-            color: verboseColor,
-            modelId: parsedModelEffective.canonical,
-          }),
-        })
-      } catch (error) {
-        if (isUnsupportedAttachmentError(error)) {
-          throw new Error(
-            `Model ${parsedModel.canonical} does not support attaching files of type ${attachment.mediaType}. Try a different --model (e.g. google/gemini-3-flash-preview).`,
-            { cause: error }
-          )
-        }
-        throw error
-      }
-      llmCalls.push({
-        provider: result.provider,
-        model: result.canonicalModelId,
-        usage: result.usage,
-        purpose: 'summary',
-      })
-      summary = result.text
+      if (lastError instanceof Error) throw lastError
+      throw new Error('No model available for this input')
     }
 
-    summary = summary.trim()
-    if (summary.length === 0) {
-      const last = getLastStreamError?.()
-      if (last instanceof Error) {
-        throw new Error(last.message, { cause: last })
-      }
-      throw new Error('LLM returned an empty summary')
-    }
+    const { summary, summaryAlreadyPrinted, parsedModelEffective, maxOutputTokensForCall } = summaryResult
 
     const extracted = {
       kind: 'asset' as const,
@@ -1602,7 +1792,7 @@ export async function runCli(
                   ? { kind: 'preset', preset: lengthArg.preset }
                   : { kind: 'chars', maxCharacters: lengthArg.maxCharacters },
               maxOutputTokens: maxOutputTokensArg,
-              model,
+              model: requestedModelLabel,
             }
           : {
               kind: 'asset-url',
@@ -1613,7 +1803,7 @@ export async function runCli(
                   ? { kind: 'preset', preset: lengthArg.preset }
                   : { kind: 'chars', maxCharacters: lengthArg.maxCharacters },
               maxOutputTokens: maxOutputTokensArg,
-              model,
+              model: requestedModelLabel,
             }
       const payload: JsonOutput = {
         input,
@@ -1629,7 +1819,7 @@ export async function runCli(
         prompt: promptText,
         llm: {
           provider: parsedModelEffective.provider,
-          model: parsedModelEffective.canonical,
+          model: usedAttempt.userModelId,
           maxCompletionTokens: maxOutputTokensForCall,
           strategy: 'single',
         },
@@ -1646,7 +1836,7 @@ export async function runCli(
         writeFinishLine({
           stderr,
           elapsedMs: Date.now() - runStartedAtMs,
-          model: parsedModelEffective.canonical,
+          model: usedAttempt.userModelId,
           report: finishReport,
           costUsd,
           color: verboseColor,
@@ -1672,6 +1862,8 @@ export async function runCli(
       }
     }
 
+    writeViaFooter([...assetFooterParts, `model ${usedAttempt.userModelId}`])
+
     const report = shouldComputeReport ? await buildReport() : null
     if (metricsDetailed && report) writeMetricsReport(report)
     if (metricsEnabled && report) {
@@ -1679,7 +1871,7 @@ export async function runCli(
       writeFinishLine({
         stderr,
         elapsedMs: Date.now() - runStartedAtMs,
-        model: parsedModelEffective.canonical,
+        model: usedAttempt.userModelId,
         report,
         costUsd,
         color: verboseColor,
@@ -1731,6 +1923,17 @@ export async function runCli(
         sourceKind: 'file',
         sourceLabel: loaded.sourceLabel,
         attachment: loaded.attachment,
+        onModelChosen: (modelId) => {
+          if (!progressEnabled) return
+          const mt = loaded.attachment.mediaType
+          const name = loaded.attachment.filename
+          const details = sizeLabel ? `${mt}, ${sizeLabel}` : mt
+          spinner.setText(
+            name
+              ? `Summarizing ${name} (${details}, model: ${modelId})…`
+              : `Summarizing ${details} (model: ${modelId})…`
+          )
+        },
       })
       return
     } finally {
@@ -1783,6 +1986,10 @@ export async function runCli(
           sourceKind: 'asset-url',
           sourceLabel: loaded.sourceLabel,
           attachment: loaded.attachment,
+          onModelChosen: (modelId) => {
+            if (!progressEnabled) return
+            spinner.setText(`Summarizing (model: ${modelId})…`)
+          },
         })
         return
       } finally {
@@ -1815,28 +2022,70 @@ export async function runCli(
 
   const markdownRequested = wantsMarkdown
   const effectiveMarkdownMode = markdownRequested ? markdownMode : 'off'
-  const hasKeyForModel =
-    parsedModelForLlm.provider === 'xai'
+
+  const markdownModel = (() => {
+    if (!markdownRequested) return null
+
+    // Prefer the explicitly chosen model when it is a native provider (keeps behavior stable).
+    if (requestedModel.kind === 'fixed' && requestedModel.transport === 'native') {
+      return { llmModelId: requestedModel.llmModelId, forceOpenRouter: false }
+    }
+
+    // Otherwise pick a safe, broadly-capable default for HTML→Markdown conversion.
+    if (googleConfigured) {
+      return { llmModelId: 'google/gemini-3-flash-preview', forceOpenRouter: false }
+    }
+    if (Boolean(apiKey)) {
+      return { llmModelId: 'openai/gpt-5-nano', forceOpenRouter: false }
+    }
+    if (openrouterConfigured) {
+      return { llmModelId: 'openai/openai/gpt-5-nano', forceOpenRouter: true }
+    }
+    if (anthropicConfigured) {
+      return { llmModelId: 'anthropic/claude-sonnet-4-5', forceOpenRouter: false }
+    }
+    if (xaiConfigured) {
+      return { llmModelId: 'xai/grok-4-fast-non-reasoning', forceOpenRouter: false }
+    }
+
+    return null
+  })()
+
+  const markdownProvider = (() => {
+    if (!markdownModel) return 'none' as const
+    const parsed = parseGatewayStyleModelId(markdownModel.llmModelId)
+    return parsed.provider
+  })()
+
+  const hasKeyForMarkdownModel = (() => {
+    if (!markdownModel) return false
+    if (markdownModel.forceOpenRouter) return openrouterConfigured
+    const parsed = parseGatewayStyleModelId(markdownModel.llmModelId)
+    return parsed.provider === 'xai'
       ? xaiConfigured
-      : parsedModelForLlm.provider === 'google'
+      : parsed.provider === 'google'
         ? googleConfigured
-        : parsedModelForLlm.provider === 'anthropic'
+        : parsed.provider === 'anthropic'
           ? anthropicConfigured
           : Boolean(apiKey)
-  const markdownProvider = hasKeyForModel ? parsedModelForLlm.provider : 'none'
+  })()
 
-  if (markdownRequested && effectiveMarkdownMode === 'llm' && !hasKeyForModel) {
-    const required =
-      parsedModelForLlm.provider === 'xai'
-        ? 'XAI_API_KEY'
-        : parsedModelForLlm.provider === 'google'
-          ? 'GEMINI_API_KEY (or GOOGLE_GENERATIVE_AI_API_KEY / GOOGLE_API_KEY)'
-          : parsedModelForLlm.provider === 'anthropic'
-            ? 'ANTHROPIC_API_KEY'
-            : 'OPENAI_API_KEY'
-    throw new Error(
-      `--markdown-mode llm requires ${required} for model ${parsedModelForLlm.canonical}`
-    )
+  if (markdownRequested && effectiveMarkdownMode === 'llm' && !hasKeyForMarkdownModel) {
+    const required = (() => {
+      if (markdownModel?.forceOpenRouter) return 'OPENROUTER_API_KEY'
+      if (markdownModel) {
+        const parsed = parseGatewayStyleModelId(markdownModel.llmModelId)
+        return parsed.provider === 'xai'
+          ? 'XAI_API_KEY'
+          : parsed.provider === 'google'
+            ? 'GEMINI_API_KEY (or GOOGLE_GENERATIVE_AI_API_KEY / GOOGLE_API_KEY)'
+            : parsed.provider === 'anthropic'
+              ? 'ANTHROPIC_API_KEY'
+              : 'OPENAI_API_KEY'
+      }
+      return 'GEMINI_API_KEY (or GOOGLE_GENERATIVE_AI_API_KEY / GOOGLE_API_KEY)'
+    })()
+    throw new Error(`--markdown-mode llm requires ${required}`)
   }
 
   writeVerbose(
@@ -1844,7 +2093,7 @@ export async function runCli(
     verbose,
     `config url=${url} timeoutMs=${timeoutMs} youtube=${youtubeMode} firecrawl=${firecrawlMode} length=${
       lengthArg.kind === 'preset' ? lengthArg.preset : `${lengthArg.maxCharacters} chars`
-    } maxOutputTokens=${formatOptionalNumber(maxOutputTokensArg)} retries=${retries} json=${json} extract=${extractMode} format=${format} preprocess=${preprocessMode} markdownMode=${markdownMode} model=${model} stream=${effectiveStreamMode} render=${effectiveRenderMode}`,
+    } maxOutputTokens=${formatOptionalNumber(maxOutputTokensArg)} retries=${retries} json=${json} extract=${extractMode} format=${format} preprocess=${preprocessMode} markdownMode=${markdownMode} model=${requestedModelLabel} videoMode=${videoMode} stream=${effectiveStreamMode} render=${effectiveRenderMode}`,
     verboseColor
   )
   writeVerbose(
@@ -1874,9 +2123,12 @@ export async function runCli(
       : null
 
   const llmHtmlToMarkdown =
-    markdownRequested && (effectiveMarkdownMode === 'llm' || markdownProvider !== 'none')
+    markdownRequested &&
+    markdownModel !== null &&
+    (effectiveMarkdownMode === 'llm' || markdownProvider !== 'none')
       ? createHtmlToMarkdownConverter({
-          modelId: model,
+          modelId: markdownModel.llmModelId,
+          forceOpenRouter: markdownModel.forceOpenRouter,
           xaiApiKey: xaiConfigured ? xaiApiKey : null,
           googleApiKey: googleConfigured ? googleApiKey : null,
           openaiApiKey: apiKey,
@@ -1889,7 +2141,7 @@ export async function runCli(
             stderr,
             verbose,
             color: verboseColor,
-            modelId: model,
+            modelId: markdownModel.llmModelId,
           }),
           onUsage: ({ model: usedModel, provider, usage }) => {
             llmCalls.push({ provider, model: usedModel, usage, purpose: 'markdown' })
@@ -2175,19 +2427,46 @@ export async function runCli(
     } catch (error) {
       throw withBirdTip(error, url, env)
     }
-    const extractedContentBytes = Buffer.byteLength(extracted.content, 'utf8')
-    const extractedContentSize = formatBytes(extractedContentBytes)
-    const viaSources: string[] = []
-    if (extracted.diagnostics.strategy === 'bird') {
-      viaSources.push('bird')
+    let extractedContentSize = 'unknown'
+    let viaSourceLabel = ''
+    let footerBaseParts: string[] = []
+
+    const recomputeExtractionUi = () => {
+      const extractedContentBytes = Buffer.byteLength(extracted.content, 'utf8')
+      extractedContentSize = formatBytes(extractedContentBytes)
+
+      const viaSources: string[] = []
+      if (extracted.diagnostics.strategy === 'bird') {
+        viaSources.push('bird')
+      }
+      if (extracted.diagnostics.strategy === 'nitter') {
+        viaSources.push('Nitter')
+      }
+      if (extracted.diagnostics.firecrawl.used) {
+        viaSources.push('Firecrawl')
+      }
+      viaSourceLabel = viaSources.length > 0 ? `, ${viaSources.join('+')}` : ''
+
+      footerBaseParts = []
+      if (extracted.diagnostics.strategy === 'bird') footerBaseParts.push('bird')
+      if (extracted.diagnostics.strategy === 'nitter') footerBaseParts.push('nitter')
+      if (extracted.diagnostics.firecrawl.used) footerBaseParts.push('firecrawl')
+      if (extracted.diagnostics.markdown.used) {
+        footerBaseParts.push(
+          extracted.diagnostics.markdown.provider === 'llm' ? 'html→md llm' : 'markdown'
+        )
+      }
+      if (extracted.diagnostics.transcript.textProvided) {
+        footerBaseParts.push(
+          `transcript ${extracted.diagnostics.transcript.provider ?? 'unknown'}`
+        )
+      }
+      if (extracted.isVideoOnly && extracted.video) {
+        footerBaseParts.push(extracted.video.kind === 'youtube' ? 'video youtube' : 'video url')
+      }
     }
-    if (extracted.diagnostics.strategy === 'nitter') {
-      viaSources.push('Nitter')
-    }
-    if (extracted.diagnostics.firecrawl.used) {
-      viaSources.push('Firecrawl')
-    }
-    const viaSourceLabel = viaSources.length > 0 ? `, ${viaSources.join('+')}` : ''
+
+    recomputeExtractionUi()
     if (progressEnabled) {
       websiteProgress?.stop?.()
       spinner.setText(
@@ -2254,6 +2533,68 @@ export async function runCli(
       stderr.write(`${UVX_TIP}\n`)
     }
 
+    if (!isYoutubeUrl && extracted.isVideoOnly && extracted.video) {
+      if (extracted.video.kind === 'youtube') {
+        writeVerbose(
+          stderr,
+          verbose,
+          `video-only page detected; switching to YouTube URL ${extracted.video.url}`,
+          verboseColor
+        )
+        if (progressEnabled) {
+          spinner.setText('Video-only page: fetching YouTube transcript…')
+        }
+        extracted = await client.fetchLinkContent(extracted.video.url, {
+          timeoutMs,
+          youtubeTranscript: youtubeMode,
+          firecrawl: firecrawlMode,
+          format: markdownRequested ? 'markdown' : 'text',
+        })
+        recomputeExtractionUi()
+        if (progressEnabled) {
+          spinner.setText(
+            extractMode
+              ? `Extracted (${extractedContentSize}${viaSourceLabel})`
+              : `Summarizing (sent ${extractedContentSize}${viaSourceLabel})…`
+          )
+        }
+      } else if (extracted.video.kind === 'direct') {
+        const wantsVideoUnderstanding = videoMode === 'understand' || videoMode === 'auto'
+        const canVideoUnderstand =
+          wantsVideoUnderstanding &&
+          googleConfigured &&
+          (requestedModel.kind === 'auto' ||
+            (fixedModelSpec?.transport === 'native' && fixedModelSpec.provider === 'google'))
+
+        if (canVideoUnderstand) {
+          if (progressEnabled) spinner.setText('Downloading video…')
+          const loadedVideo = await loadRemoteAsset({
+            url: extracted.video.url,
+            fetchImpl: trackedFetch,
+            timeoutMs,
+          })
+          assertAssetMediaTypeSupported({ attachment: loadedVideo.attachment, sizeLabel: null })
+
+          let chosenModel: string | null = null
+          if (progressEnabled) spinner.setText('Summarizing video…')
+          await summarizeAsset({
+            sourceKind: 'asset-url',
+            sourceLabel: loadedVideo.sourceLabel,
+            attachment: loadedVideo.attachment,
+            onModelChosen: (modelId) => {
+              chosenModel = modelId
+              if (progressEnabled) spinner.setText(`Summarizing video (model: ${modelId})…`)
+            },
+          })
+          writeViaFooter([
+            ...footerBaseParts,
+            ...(chosenModel ? [`model ${chosenModel}`] : []),
+          ])
+          return
+        }
+      }
+    }
+
     const isYouTube = extracted.siteName === 'YouTube'
     const prompt = buildLinkSummaryPrompt({
       url: extracted.url,
@@ -2288,7 +2629,7 @@ export async function runCli(
                 ? { kind: 'preset', preset: lengthArg.preset }
                 : { kind: 'chars', maxCharacters: lengthArg.maxCharacters },
             maxOutputTokens: maxOutputTokensArg,
-            model,
+            model: requestedModelLabel,
           },
           env: {
             hasXaiKey: Boolean(xaiApiKey),
@@ -2313,7 +2654,7 @@ export async function runCli(
           writeFinishLine({
             stderr,
             elapsedMs: Date.now() - runStartedAtMs,
-            model,
+            model: requestedModelLabel,
             report: finishReport,
             costUsd,
             color: verboseColor,
@@ -2323,6 +2664,7 @@ export async function runCli(
       }
 
       stdout.write(`${extracted.content}\n`)
+      writeViaFooter(footerBaseParts)
       const report = shouldComputeReport ? await buildReport() : null
       if (metricsDetailed && report) writeMetricsReport(report)
       if (metricsEnabled && report) {
@@ -2330,7 +2672,7 @@ export async function runCli(
         writeFinishLine({
           stderr,
           elapsedMs: Date.now() - runStartedAtMs,
-          model,
+          model: requestedModelLabel,
           report,
           costUsd,
           color: verboseColor,
@@ -2367,7 +2709,7 @@ export async function runCli(
                 ? { kind: 'preset', preset: lengthArg.preset }
                 : { kind: 'chars', maxCharacters: lengthArg.maxCharacters },
             maxOutputTokens: maxOutputTokensArg,
-            model,
+            model: requestedModelLabel,
           },
           env: {
             hasXaiKey: Boolean(xaiApiKey),
@@ -2392,7 +2734,7 @@ export async function runCli(
           writeFinishLine({
             stderr,
             elapsedMs: Date.now() - runStartedAtMs,
-            model,
+            model: requestedModelLabel,
             report: finishReport,
             costUsd,
             color: verboseColor,
@@ -2402,6 +2744,7 @@ export async function runCli(
       }
 
       stdout.write(`${extracted.content}\n`)
+      writeViaFooter(footerBaseParts)
       const report = shouldComputeReport ? await buildReport() : null
       if (metricsDetailed && report) writeMetricsReport(report)
       if (metricsEnabled && report) {
@@ -2409,7 +2752,7 @@ export async function runCli(
         writeFinishLine({
           stderr,
           elapsedMs: Date.now() - runStartedAtMs,
-          model,
+          model: requestedModelLabel,
           report,
           costUsd,
           color: verboseColor,
@@ -2418,273 +2761,203 @@ export async function runCli(
       return
     }
 
-    const parsedModel = parseGatewayStyleModelId(model)
-    const apiKeysForLlm = {
-      xaiApiKey,
-      openaiApiKey: apiKey,
-      googleApiKey: googleConfigured ? googleApiKey : null,
-      anthropicApiKey: anthropicConfigured ? anthropicApiKey : null,
-      openrouterApiKey: openrouterConfigured ? openrouterApiKey : null,
-    }
+    const promptTokens = countTokens(prompt)
 
-    const requiredKeyEnv =
-      parsedModel.provider === 'xai'
-        ? 'XAI_API_KEY'
-        : parsedModel.provider === 'google'
-          ? 'GEMINI_API_KEY (or GOOGLE_GENERATIVE_AI_API_KEY / GOOGLE_API_KEY)'
-          : parsedModel.provider === 'anthropic'
-            ? 'ANTHROPIC_API_KEY'
-            : 'OPENAI_API_KEY (or OPENROUTER_API_KEY)'
-    const hasRequiredKey =
-      parsedModel.provider === 'xai'
-        ? Boolean(xaiApiKey)
-        : parsedModel.provider === 'google'
-          ? googleConfigured
-          : parsedModel.provider === 'anthropic'
-            ? anthropicConfigured
-            : Boolean(apiKey) || openrouterConfigured
-    if (!hasRequiredKey) {
-      throw new Error(
-        `Missing ${requiredKeyEnv} for model ${parsedModel.canonical}. Set the env var or choose a different --model.`
-      )
-    }
-
-    const modelResolution = await resolveModelIdForLlmCall({
-      parsedModel,
-      apiKeys: { googleApiKey: apiKeysForLlm.googleApiKey },
-      fetchImpl: trackedFetch,
-      timeoutMs,
-    })
-    if (modelResolution.note && verbose) {
-      writeVerbose(stderr, verbose, modelResolution.note, verboseColor)
-    }
-    const parsedModelEffective = parseGatewayStyleModelId(modelResolution.modelId)
-    const streamingEnabledForCall = streamingEnabled && !modelResolution.forceStreamOff
-
-    writeVerbose(
-      stderr,
-      verbose,
-      `mode summarize provider=${parsedModelEffective.provider} model=${parsedModelEffective.canonical}`,
-      verboseColor
-    )
-    const maxOutputTokensForCall = await resolveMaxOutputTokensForCall(
-      parsedModelEffective.canonical
-    )
-    const maxInputTokensForCall = await resolveMaxInputTokensForCall(parsedModelEffective.canonical)
     if (
-      typeof maxInputTokensForCall === 'number' &&
-      Number.isFinite(maxInputTokensForCall) &&
-      maxInputTokensForCall > 0
+      requestedModel.kind === 'auto' &&
+      typeof desiredOutputTokens === 'number' &&
+      extracted.content.trim().length > 0 &&
+      countTokens(extracted.content) <= desiredOutputTokens
     ) {
-      const tokenCount = countTokens(prompt)
-      if (tokenCount > maxInputTokensForCall) {
+      clearProgressForStdout()
+      if (json) {
+        const finishReport = shouldComputeReport ? await buildReport() : null
+        const payload: JsonOutput = {
+          input: {
+            kind: 'url',
+            url,
+            timeoutMs,
+            youtube: youtubeMode,
+            firecrawl: firecrawlMode,
+            format,
+            markdown: effectiveMarkdownMode,
+            length:
+              lengthArg.kind === 'preset'
+                ? { kind: 'preset', preset: lengthArg.preset }
+                : { kind: 'chars', maxCharacters: lengthArg.maxCharacters },
+            maxOutputTokens: maxOutputTokensArg,
+            model: requestedModelLabel,
+          },
+          env: {
+            hasXaiKey: Boolean(xaiApiKey),
+            hasOpenAIKey: Boolean(apiKey),
+            hasApifyToken: Boolean(apifyToken),
+            hasFirecrawlKey: firecrawlConfigured,
+            hasGoogleKey: googleConfigured,
+            hasAnthropicKey: anthropicConfigured,
+          },
+          extracted,
+          prompt,
+          llm: null,
+          metrics: metricsEnabled ? finishReport : null,
+          summary: extracted.content,
+        }
+        if (metricsDetailed && finishReport) {
+          writeMetricsReport(finishReport)
+        }
+        stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
+        if (metricsEnabled && finishReport) {
+          const costUsd = await estimateCostUsd()
+          writeFinishLine({
+            stderr,
+            elapsedMs: Date.now() - runStartedAtMs,
+            model: requestedModelLabel,
+            report: finishReport,
+            costUsd,
+            color: verboseColor,
+          })
+        }
+        return
+      }
+      stdout.write(`${extracted.content}\n`)
+      writeViaFooter(footerBaseParts)
+      return
+    }
+
+    const kindForAuto = isYouTube ? ('youtube' as const) : ('website' as const)
+    const attempts: ModelAttempt[] = await (async () => {
+      if (requestedModel.kind === 'auto') {
+        const catalog = await getLiteLlmCatalog()
+        const list = buildAutoModelAttempts({
+          kind: kindForAuto,
+          promptTokens,
+          desiredOutputTokens,
+          requiresVideoUnderstanding: false,
+          env,
+          config,
+          catalog,
+          openrouterProvidersFromEnv: openRouterProviders,
+        })
+        if (verbose) {
+          for (const a of list.slice(0, 8)) {
+            writeVerbose(stderr, verbose, `auto candidate ${a.debug}`, verboseColor)
+          }
+        }
+        return list
+      }
+      if (!fixedModelSpec) {
+        throw new Error('Internal error: missing fixed model spec')
+      }
+      return [
+        {
+          userModelId: fixedModelSpec.userModelId,
+          llmModelId: fixedModelSpec.llmModelId,
+          openrouterProviders: fixedModelSpec.openrouterProviders,
+          forceOpenRouter: fixedModelSpec.forceOpenRouter,
+          requiredEnv: fixedModelSpec.requiredEnv,
+        },
+      ]
+    })()
+
+    const onModelChosen = (modelId: string) => {
+      if (!progressEnabled) return
+      spinner.setText(`Summarizing (sent ${extractedContentSize}${viaSourceLabel}, model: ${modelId})…`)
+    }
+
+    let summaryResult:
+      | {
+          summary: string
+          summaryAlreadyPrinted: boolean
+          parsedModelEffective: ReturnType<typeof parseGatewayStyleModelId>
+          maxOutputTokensForCall: number | null
+        }
+      | null = null
+    let usedAttempt: ModelAttempt | null = null
+    let lastError: unknown = null
+
+    for (const attempt of attempts) {
+      const hasKey = envHasKeyFor(attempt.requiredEnv)
+      if (!hasKey) {
+        if (requestedModel.kind === 'auto') {
+          writeVerbose(stderr, verbose, `auto skip ${attempt.userModelId}: missing ${attempt.requiredEnv}`, verboseColor)
+          continue
+        }
         throw new Error(
-          `Input token count (${formatCount(tokenCount)}) exceeds model input limit (${formatCount(maxInputTokensForCall)}). Tokenized with GPT tokenizer; prompt included.`
+          `Missing ${attempt.requiredEnv} for model ${attempt.userModelId}. Set the env var or choose a different --model.`
+        )
+      }
+
+      try {
+        summaryResult = await runSummaryAttempt({
+          attempt,
+          prompt,
+          allowStreaming: requestedModel.kind !== 'auto',
+          onModelChosen,
+        })
+        usedAttempt = attempt
+        break
+      } catch (error) {
+        lastError = error
+        if (requestedModel.kind !== 'auto') {
+          throw error
+        }
+        writeVerbose(
+          stderr,
+          verbose,
+          `auto failed ${attempt.userModelId}: ${error instanceof Error ? error.message : String(error)}`,
+          verboseColor
         )
       }
     }
-    const shouldBufferSummaryForRender =
-      streamingEnabledForCall && effectiveRenderMode === 'md' && isRichTty(stdout)
-    const shouldLiveRenderSummary =
-      streamingEnabledForCall && effectiveRenderMode === 'md-live' && isRichTty(stdout)
-    const shouldStreamSummaryToStdout =
-      streamingEnabledForCall && !shouldBufferSummaryForRender && !shouldLiveRenderSummary
-    let summaryAlreadyPrinted = false
 
-    let summary = ''
-    let getLastStreamError: (() => unknown) | null = null
-    writeVerbose(stderr, verbose, 'summarize strategy=single', verboseColor)
-    if (streamingEnabledForCall) {
-      writeVerbose(
-        stderr,
-        verbose,
-        `summarize stream=on buffered=${shouldBufferSummaryForRender}`,
-        verboseColor
-      )
-      let streamResult: Awaited<ReturnType<typeof streamTextWithModelId>> | null = null
-      try {
-        streamResult = await streamTextWithModelId({
-          modelId: parsedModelEffective.canonical,
-          apiKeys: apiKeysForLlm,
+    if (!summaryResult || !usedAttempt) {
+      clearProgressForStdout()
+      if (json) {
+        const finishReport = shouldComputeReport ? await buildReport() : null
+        const payload: JsonOutput = {
+          input: {
+            kind: 'url',
+            url,
+            timeoutMs,
+            youtube: youtubeMode,
+            firecrawl: firecrawlMode,
+            format,
+            markdown: effectiveMarkdownMode,
+            length:
+              lengthArg.kind === 'preset'
+                ? { kind: 'preset', preset: lengthArg.preset }
+                : { kind: 'chars', maxCharacters: lengthArg.maxCharacters },
+            maxOutputTokens: maxOutputTokensArg,
+            model: requestedModelLabel,
+          },
+          env: {
+            hasXaiKey: Boolean(xaiApiKey),
+            hasOpenAIKey: Boolean(apiKey),
+            hasApifyToken: Boolean(apifyToken),
+            hasFirecrawlKey: firecrawlConfigured,
+            hasGoogleKey: googleConfigured,
+            hasAnthropicKey: anthropicConfigured,
+          },
+          extracted,
           prompt,
-          temperature: 0,
-          maxOutputTokens: maxOutputTokensForCall ?? undefined,
-          timeoutMs,
-          fetchImpl: trackedFetch,
-        })
-      } catch (error) {
-        if (isStreamingTimeoutError(error)) {
-          writeVerbose(
-            stderr,
-            verbose,
-            `Streaming timed out for ${parsedModelEffective.canonical}; falling back to non-streaming.`,
-            verboseColor
-          )
-          const result = await summarizeWithModelId({
-            modelId: parsedModelEffective.canonical,
-            prompt,
-            maxOutputTokens: maxOutputTokensForCall ?? undefined,
-            timeoutMs,
-            fetchImpl: trackedFetch,
-            apiKeys: apiKeysForLlm,
-            openrouter: openrouterOptions,
-            retries,
-            onRetry: createRetryLogger({
-              stderr,
-              verbose,
-              color: verboseColor,
-              modelId: parsedModelEffective.canonical,
-            }),
-          })
-          llmCalls.push({
-            provider: result.provider,
-            model: result.canonicalModelId,
-            usage: result.usage,
-            purpose: 'summary',
-          })
-          summary = result.text
-          streamResult = null
-        } else if (
-          parsedModelEffective.provider === 'google' &&
-          isGoogleStreamingUnsupportedError(error)
-        ) {
-          writeVerbose(
-            stderr,
-            verbose,
-            `Google model ${parsedModelEffective.canonical} rejected streamGenerateContent; falling back to non-streaming.`,
-            verboseColor
-          )
-          const result = await summarizeWithModelId({
-            modelId: parsedModelEffective.canonical,
-            prompt,
-            maxOutputTokens: maxOutputTokensForCall ?? undefined,
-            timeoutMs,
-            fetchImpl: trackedFetch,
-            apiKeys: apiKeysForLlm,
-            openrouter: openrouterOptions,
-            retries,
-            onRetry: createRetryLogger({
-              stderr,
-              verbose,
-              color: verboseColor,
-              modelId: parsedModelEffective.canonical,
-            }),
-          })
-          llmCalls.push({
-            provider: result.provider,
-            model: result.canonicalModelId,
-            usage: result.usage,
-            purpose: 'summary',
-          })
-          summary = result.text
-          streamResult = null
-        } else {
-          throw error
+          llm: null,
+          metrics: metricsEnabled ? finishReport : null,
+          summary: extracted.content,
         }
+        stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
+        return
       }
-
-      if (streamResult) {
-        getLastStreamError = streamResult.lastError
-        let streamed = ''
-        const liveRenderer = shouldLiveRenderSummary
-          ? createLiveRenderer({
-              write: (chunk) => {
-                clearProgressForStdout()
-                stdout.write(chunk)
-              },
-              width: markdownRenderWidth(stdout, env),
-              renderFrame: (markdown) =>
-                renderMarkdownAnsi(markdown, {
-                  width: markdownRenderWidth(stdout, env),
-                  wrap: true,
-                  color: supportsColor(stdout, env),
-                }),
-            })
-          : null
-        let lastFrameAtMs = 0
-        try {
-          let cleared = false
-          for await (const delta of streamResult.textStream) {
-            const merged = mergeStreamingChunk(streamed, delta)
-            streamed = merged.next
-            if (shouldStreamSummaryToStdout) {
-              if (!cleared) {
-                clearProgressForStdout()
-                cleared = true
-              }
-              if (merged.appended) stdout.write(merged.appended)
-              continue
-            }
-
-            if (liveRenderer) {
-              const now = Date.now()
-              const due = now - lastFrameAtMs >= 120
-              const hasNewline = delta.includes('\n')
-              if (hasNewline || due) {
-                liveRenderer.render(streamed)
-                lastFrameAtMs = now
-              }
-            }
-          }
-
-          const trimmed = streamed.trim()
-          streamed = trimmed
-          if (liveRenderer) {
-            liveRenderer.render(trimmed)
-            summaryAlreadyPrinted = true
-          }
-        } finally {
-          liveRenderer?.finish()
-        }
-        const usage = await streamResult.usage
-        llmCalls.push({
-          provider: streamResult.provider,
-          model: streamResult.canonicalModelId,
-          usage,
-          purpose: 'summary',
-        })
-        summary = streamed
-        if (shouldStreamSummaryToStdout) {
-          if (!streamed.endsWith('\n')) {
-            stdout.write('\n')
-          }
-          summaryAlreadyPrinted = true
-        }
+      stdout.write(`${extracted.content}\n`)
+      if (footerBaseParts.length > 0) {
+        writeViaFooter([...footerBaseParts, 'no model'])
       }
-    } else {
-      const result = await summarizeWithModelId({
-        modelId: parsedModelEffective.canonical,
-        prompt,
-        maxOutputTokens: maxOutputTokensForCall ?? undefined,
-        timeoutMs,
-        fetchImpl: trackedFetch,
-        apiKeys: apiKeysForLlm,
-        openrouter: openrouterOptions,
-        retries,
-        onRetry: createRetryLogger({
-          stderr,
-          verbose,
-          color: verboseColor,
-          modelId: parsedModelEffective.canonical,
-        }),
-      })
-      llmCalls.push({
-        provider: result.provider,
-        model: result.canonicalModelId,
-        usage: result.usage,
-        purpose: 'summary',
-      })
-      summary = result.text
+      if (lastError instanceof Error && verbose) {
+        writeVerbose(stderr, verbose, `auto failed all models: ${lastError.message}`, verboseColor)
+      }
+      return
     }
 
-    summary = summary.trim()
-    if (summary.length === 0) {
-      const last = getLastStreamError?.()
-      if (last instanceof Error) {
-        throw new Error(last.message, { cause: last })
-      }
-      throw new Error('LLM returned an empty summary')
-    }
+    const { summary, summaryAlreadyPrinted, parsedModelEffective, maxOutputTokensForCall } = summaryResult
 
     if (json) {
       const finishReport = shouldComputeReport ? await buildReport() : null
@@ -2702,7 +2975,7 @@ export async function runCli(
               ? { kind: 'preset', preset: lengthArg.preset }
               : { kind: 'chars', maxCharacters: lengthArg.maxCharacters },
           maxOutputTokens: maxOutputTokensArg,
-          model,
+          model: requestedModelLabel,
         },
         env: {
           hasXaiKey: Boolean(xaiApiKey),
@@ -2716,7 +2989,7 @@ export async function runCli(
         prompt,
         llm: {
           provider: parsedModelEffective.provider,
-          model: parsedModelEffective.canonical,
+          model: usedAttempt.userModelId,
           maxCompletionTokens: maxOutputTokensForCall,
           strategy: 'single',
         },
@@ -2728,19 +3001,19 @@ export async function runCli(
         writeMetricsReport(finishReport)
       }
       stdout.write(`${JSON.stringify(payload, null, 2)}\n`)
-      if (metricsEnabled && finishReport) {
-        const costUsd = await estimateCostUsd()
-        writeFinishLine({
-          stderr,
-          elapsedMs: Date.now() - runStartedAtMs,
-          model: parsedModelEffective.canonical,
-          report: finishReport,
-          costUsd,
-          color: verboseColor,
-        })
+        if (metricsEnabled && finishReport) {
+          const costUsd = await estimateCostUsd()
+          writeFinishLine({
+            stderr,
+            elapsedMs: Date.now() - runStartedAtMs,
+            model: usedAttempt.userModelId,
+            report: finishReport,
+            costUsd,
+            color: verboseColor,
+          })
+        }
+        return
       }
-      return
-    }
 
     if (!summaryAlreadyPrinted) {
       clearProgressForStdout()

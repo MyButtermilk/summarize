@@ -12,7 +12,8 @@ By default `summarize` will call an LLM using **direct provider API keys**.
 - `XAI_API_KEY` (required for `xai/...` models)
 - `OPENAI_API_KEY` (required for `openai/...` models)
 - `OPENAI_BASE_URL` (optional; OpenAI-compatible API endpoint, e.g. OpenRouter)
-- `OPENROUTER_API_KEY` (optional; used when `OPENAI_BASE_URL` points to OpenRouter)
+- `OPENROUTER_API_KEY` (optional; required for `openrouter/...` models; also used when `OPENAI_BASE_URL` points to OpenRouter)
+- `OPENROUTER_PROVIDERS` (optional; provider fallback order for OpenRouter, e.g. `groq,google-vertex`)
 - `GEMINI_API_KEY` (required for `google/...` models; also accepts `GOOGLE_GENERATIVE_AI_API_KEY` / `GOOGLE_API_KEY`)
 - `ANTHROPIC_API_KEY` (required for `anthropic/...` models)
 - `SUMMARIZE_MODEL` (optional; overrides default model selection)
@@ -26,8 +27,11 @@ By default `summarize` will call an LLM using **direct provider API keys**.
     - `xai/grok-4-fast-non-reasoning`
     - `google/gemini-2.0-flash`
     - `anthropic/claude-sonnet-4-5`
+    - `openrouter/openai/gpt-5-nano` (force OpenRouter)
 - `--model auto`
-  - See `docs/model-auto.md` (design)
+  - See `docs/model-auto.md`
+- `--video-mode auto|transcript|understand`
+  - Only relevant for video inputs / video-only pages.
 - `--length short|medium|long|xl|xxl|<chars>`
   - This is *soft guidance* to the model (no hard truncation).
   - Minimum numeric value: 50 chars.

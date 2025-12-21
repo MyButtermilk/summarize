@@ -83,6 +83,7 @@ Examples:
 - `anthropic/claude-opus-4-5`
 - `xai/grok-4-fast-non-reasoning`
 - `google/gemini-3-flash-preview`
+- `openrouter/openai/gpt-5-nano` (force OpenRouter)
 
 Note: some models/providers don’t support streaming or certain file media types. When that happens, the CLI prints a friendly error (or auto-disables streaming for that model when supported by the provider).
 
@@ -168,6 +169,14 @@ Supported keys today:
 }
 ```
 
+Also supported:
+
+- `model: "auto"` (automatic model selection + fallback)
+- `auto.rules` (customize candidates / ordering)
+- `media.videoMode: "auto"|"transcript"|"understand"`
+
+Note: the config is parsed leniently (JSON5), but **comments are not allowed**.
+
 Precedence:
 
 1) `--model`
@@ -187,14 +196,14 @@ Set the key matching your chosen `--model`:
 
 OpenRouter (OpenAI-compatible):
 
-- Set `OPENROUTER_API_KEY=...` to route `openai/...` models through OpenRouter
-- Use OpenRouter models via the `openai/...` prefix, e.g. `--model openai/openai/gpt-oss-20b`
+- Set `OPENROUTER_API_KEY=...`
+- Prefer forcing OpenRouter per model id: `--model openrouter/<provider>/<model>` (e.g. `openrouter/openai/gpt-5-nano`)
 - Optional: `OPENROUTER_PROVIDERS=...` to specify provider fallback order (e.g. `groq,google-vertex`)
 
 Example:
 
 ```bash
-OPENROUTER_API_KEY=sk-or-... summarize "https://example.com" --model openai/openai/gpt-oss-20b
+OPENROUTER_API_KEY=sk-or-... summarize "https://example.com" --model openrouter/openai/gpt-5-nano
 ```
 
 With provider ordering (falls back through providers in order):
@@ -203,7 +212,7 @@ With provider ordering (falls back through providers in order):
 OPENROUTER_API_KEY=sk-or-... OPENROUTER_PROVIDERS="groq,google-vertex" summarize "https://example.com"
 ```
 
-Legacy: `OPENAI_BASE_URL=https://openrouter.ai/api/v1` with `OPENAI_API_KEY` also works.
+Legacy: `OPENAI_BASE_URL=https://openrouter.ai/api/v1` (and either `OPENAI_API_KEY` or `OPENROUTER_API_KEY`) also works.
 
 Optional services:
 

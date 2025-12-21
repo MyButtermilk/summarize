@@ -39,6 +39,8 @@ export interface ExtractedLinkContent {
   transcriptCharacters: number | null
   transcriptLines: number | null
   transcriptSource: TranscriptSource | null
+  video: { kind: 'youtube' | 'direct'; url: string } | null
+  isVideoOnly: boolean
   diagnostics: ContentFetchDiagnostics
 }
 
@@ -50,5 +52,7 @@ export interface FinalizationArguments {
   description: string | null
   siteName: string | null
   transcriptResolution: TranscriptResolution
+  video: { kind: 'youtube' | 'direct'; url: string } | null
+  isVideoOnly: boolean
   diagnostics: ContentFetchDiagnostics
 }
