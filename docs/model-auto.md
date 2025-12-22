@@ -49,6 +49,8 @@ Default config file: `~/.summarize/config.json`
 
 This file is parsed leniently (JSON5), but **comments are not allowed**.
 
+`auto` must be an array. Legacy `auto: { "rules": [...] }` is not supported.
+
 Example:
 
 ```json

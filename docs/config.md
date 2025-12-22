@@ -57,3 +57,4 @@ Additional keys (optional):
 Notes:
 
 - Parsed leniently (JSON5), but **comments are not allowed**.
+- `auto` must be an array. Legacy `auto: { "rules": [...] }` is not supported.
