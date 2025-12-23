@@ -4,7 +4,8 @@
   "description": "Link → clean text → summary.",
   "type": "module",
   "bin": {
-    "summarize": "./dist/cli.cjs"
+    "summarize": "./dist/cli.cjs",
+    "summarizer": "./dist/cli.cjs"
   },
   "main": "./dist/esm/index.js",
   "module": "./dist/esm/index.js",

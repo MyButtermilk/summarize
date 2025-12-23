@@ -45,6 +45,7 @@ import { parseGatewayStyleModelId } from './llm/model-id.js'
 import { convertToMarkdownWithMarkitdown, type ExecFileFn } from './markitdown.js'
 import { buildAutoModelAttempts } from './model-auto.js'
 import { type FixedModelSpec, parseRequestedModelId, type RequestedModel } from './model-spec.js'
+import { generateFree } from './generate-free.js'
 import {
   loadLiteLlmCatalog,
   resolveLiteLlmMaxInputTokensForModelId,
@@ -452,7 +453,7 @@ function buildProgram() {
     .option('--retries <count>', 'LLM retry attempts on timeout (default: 1).', '1')
     .option(
       '--model <model>',
-      'LLM model id: auto, <bag>, cli/<provider>/<model>, xai/..., openai/..., google/..., anthropic/... or openrouter/<author>/<slug> (default: auto)',
+      'LLM model id: auto, <name>, cli/<provider>/<model>, xai/..., openai/..., google/..., anthropic/... or openrouter/<author>/<slug> (default: auto)',
       undefined
     )
     .addOption(
@@ -805,7 +806,7 @@ ${heading('Examples')}
   ${cmd('summarize "https://example.com" --extract --format md --markdown-mode llm')} ${dim('# extracted markdown via LLM')}
   ${cmd('summarize "https://www.youtube.com/watch?v=I845O57ZSy4&t=11s" --extract --youtube web')}
   ${cmd('summarize "https://example.com" --length 20k --max-output-tokens 2k --timeout 2m --model openai/gpt-5-mini')}
-  ${cmd('summarize "https://example.com" --model mybag')} ${dim('# config-defined bag')}
+  ${cmd('summarize "https://example.com" --model mymodel')} ${dim('# config-defined model name')}
   ${cmd('summarize "https://example.com" --json --verbose')}
 
 ${heading('Env Vars')}
@@ -1157,6 +1158,11 @@ export async function runCli(
   ;(globalThis as unknown as { AI_SDK_LOG_WARNINGS?: boolean }).AI_SDK_LOG_WARNINGS = false
 
   const normalizedArgv = argv.filter((arg) => arg !== '--')
+  if (normalizedArgv[0]?.toLowerCase() === 'generate-free') {
+    const verbose = normalizedArgv.includes('--verbose') || normalizedArgv.includes('--debug')
+    await generateFree({ env, fetchImpl: fetch, stdout, stderr, verbose })
+    return
+  }
   const execFileImpl = execFileOverride ?? execFile
   const version = resolvePackageVersion()
   const program = buildProgram()
@@ -1455,7 +1461,7 @@ export async function runCli(
     return fetch(input as RequestInfo, init)
   }
 
-  const bagMap = (() => {
+  const modelMap = (() => {
     const raw = config?.models
     if (!raw) return new Map<string, { name: string; model: ModelConfig }>()
     const out = new Map<string, { name: string; model: ModelConfig }>()
@@ -1475,9 +1481,9 @@ export async function runCli(
         const id = modelFromConfig.id.trim()
         if (id.length > 0) return id
       }
-      if ('bag' in modelFromConfig && typeof modelFromConfig.bag === 'string') {
-        const bag = modelFromConfig.bag.trim()
-        if (bag.length > 0) return bag
+      if ('name' in modelFromConfig && typeof modelFromConfig.name === 'string') {
+        const name = modelFromConfig.name.trim()
+        if (name.length > 0) return name
       }
       if ('mode' in modelFromConfig && modelFromConfig.mode === 'auto') return 'auto'
     }
@@ -1487,35 +1493,35 @@ export async function runCli(
   const requestedModelInput = ((explicitModelArg?.trim() ?? '') || resolvedDefaultModel).trim()
   const requestedModelInputLower = requestedModelInput.toLowerCase()
 
-  const bagMatch =
-    requestedModelInputLower !== 'auto' ? (bagMap.get(requestedModelInputLower) ?? null) : null
-  const bagModelConfig = bagMatch?.model ?? null
-  const isBagSelection = Boolean(bagMatch)
+  const namedModelMatch =
+    requestedModelInputLower !== 'auto' ? (modelMap.get(requestedModelInputLower) ?? null) : null
+  const namedModelConfig = namedModelMatch?.model ?? null
+  const isNamedModelSelection = Boolean(namedModelMatch)
 
   const configForModelSelection =
-    isBagSelection && bagModelConfig
-      ? ({ ...(configForCli ?? {}), model: bagModelConfig } as const)
+    isNamedModelSelection && namedModelConfig
+      ? ({ ...(configForCli ?? {}), model: namedModelConfig } as const)
       : configForCli
 
   const requestedModel: RequestedModel = (() => {
-    if (isBagSelection && bagModelConfig) {
-      if ('id' in bagModelConfig) return parseRequestedModelId(bagModelConfig.id)
-      if ('mode' in bagModelConfig && bagModelConfig.mode === 'auto') return { kind: 'auto' }
+    if (isNamedModelSelection && namedModelConfig) {
+      if ('id' in namedModelConfig) return parseRequestedModelId(namedModelConfig.id)
+      if ('mode' in namedModelConfig && namedModelConfig.mode === 'auto') return { kind: 'auto' }
       throw new Error(
-        `Invalid bag "${bagMatch?.name ?? requestedModelInput}": unsupported model config`
+        `Invalid model "${namedModelMatch?.name ?? requestedModelInput}": unsupported model config`
       )
     }
 
     if (requestedModelInputLower !== 'auto' && !requestedModelInput.includes('/')) {
       throw new Error(
-        `Unknown model "${requestedModelInput}". Define it as a bag in ${configPath ?? '~/.summarize/config.json'} under "models", or use a provider-prefixed id like openai/...`
+        `Unknown model "${requestedModelInput}". Define it in ${configPath ?? '~/.summarize/config.json'} under "models", or use a provider-prefixed id like openai/...`
       )
     }
 
     return parseRequestedModelId(requestedModelInput)
   })()
 
-  const requestedModelLabel = isBagSelection
+  const requestedModelLabel = isNamedModelSelection
     ? requestedModelInput
     : requestedModel.kind === 'auto'
       ? 'auto'
@@ -2232,7 +2238,7 @@ export async function runCli(
       const hasKey = envHasKeyFor(attempt.requiredEnv)
       if (!hasKey) {
         if (isFallbackModel) {
-          if (isBagSelection) {
+          if (isNamedModelSelection) {
             missingRequiredEnvs.add(attempt.requiredEnv)
             continue
           }
@@ -2260,7 +2266,7 @@ export async function runCli(
       } catch (error) {
         lastError = error
         if (
-          isBagSelection &&
+          isNamedModelSelection &&
           error instanceof Error &&
           /No allowed providers are available for the selected model/i.test(error.message)
         ) {
@@ -2285,7 +2291,7 @@ export async function runCli(
     }
 
     if (!summaryResult || !usedAttempt) {
-      if (isBagSelection) {
+      if (isNamedModelSelection) {
         if (lastError === null && missingRequiredEnvs.size > 0) {
           throw new Error(
             `Missing ${Array.from(missingRequiredEnvs).sort().join(', ')} for --model ${requestedModelInput}.`
@@ -2651,7 +2657,7 @@ export async function runCli(
         const model = config?.model
         if (!model) return null
         if ('id' in model) return model.id
-        if ('bag' in model) return model.bag
+        if ('name' in model) return model.name
         if ('mode' in model && model.mode === 'auto') return 'auto'
         return null
       })()
@@ -3391,7 +3397,7 @@ export async function runCli(
       const hasKey = envHasKeyFor(attempt.requiredEnv)
       if (!hasKey) {
         if (isFallbackModel) {
-          if (isBagSelection) {
+          if (isNamedModelSelection) {
             missingRequiredEnvs.add(attempt.requiredEnv)
             continue
           }
@@ -3418,7 +3424,7 @@ export async function runCli(
       } catch (error) {
         lastError = error
         if (
-          isBagSelection &&
+          isNamedModelSelection &&
           error instanceof Error &&
           /No allowed providers are available for the selected model/i.test(error.message)
         ) {
@@ -3437,7 +3443,7 @@ export async function runCli(
     }
 
     if (!summaryResult || !usedAttempt) {
-      if (isBagSelection) {
+      if (isNamedModelSelection) {
         if (lastError === null && missingRequiredEnvs.size > 0) {
           throw new Error(
             `Missing ${Array.from(missingRequiredEnvs).sort().join(', ')} for --model ${requestedModelInput}.`

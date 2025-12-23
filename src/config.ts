@@ -54,7 +54,7 @@ export type ModelConfig =
       mode: 'auto'
       rules?: AutoRule[]
     }
-  | { bag: string }
+  | { name: string }
 
 export type SummarizeConfig = {
   model?: ModelConfig
@@ -328,7 +328,7 @@ export function loadSummarizeConfig({ env }: { env: Record<string, string | unde
     // Shorthand:
     // - "auto" -> { mode: "auto" }
     // - "<provider>/<model>" or "openrouter/<provider>/<model>" -> { id: "..." }
-    // - "<bag>" -> { bag: "<bag>" }
+    // - "<name>" -> { name: "<name>" }
     if (typeof raw === 'string') {
       const value = raw.trim()
       if (value.length === 0) {
@@ -340,22 +340,22 @@ export function loadSummarizeConfig({ env }: { env: Record<string, string | unde
       if (value.includes('/')) {
         return { id: value } satisfies ModelConfig
       }
-      return { bag: value } satisfies ModelConfig
+      return { name: value } satisfies ModelConfig
     }
 
     if (!isRecord(raw)) {
       throw new Error(`Invalid config file ${path}: "${label}" must be an object.`)
     }
 
-    if (typeof raw.bag === 'string') {
-      const bag = raw.bag.trim()
-      if (bag.length === 0) {
-        throw new Error(`Invalid config file ${path}: "${label}.bag" must not be empty.`)
+    if (typeof raw.name === 'string') {
+      const name = raw.name.trim()
+      if (name.length === 0) {
+        throw new Error(`Invalid config file ${path}: "${label}.name" must not be empty.`)
       }
-      if (bag.toLowerCase() === 'auto') {
-        throw new Error(`Invalid config file ${path}: "${label}.bag" must not be "auto".`)
+      if (name.toLowerCase() === 'auto') {
+        throw new Error(`Invalid config file ${path}: "${label}.name" must not be "auto".`)
       }
-      return { bag } satisfies ModelConfig
+      return { name } satisfies ModelConfig
     }
 
     if (typeof raw.id === 'string') {
@@ -419,7 +419,7 @@ export function loadSummarizeConfig({ env }: { env: Record<string, string | unde
     }
 
     throw new Error(
-      `Invalid config file ${path}: "${label}" must include either "id", "bag", or { "mode": "auto" }.`
+      `Invalid config file ${path}: "${label}" must include either "id", "name", or { "mode": "auto" }.`
     )
   }
 
@@ -460,7 +460,7 @@ export function loadSummarizeConfig({ env }: { env: Record<string, string | unde
       }
       const parsedModel = parseModelConfig(value, `models.${key}`)
       if (!parsedModel) continue
-      if ('bag' in parsedModel) {
+      if ('name' in parsedModel) {
         throw new Error(
           `Invalid config file ${path}: "models.${key}" must not reference another model.`
         )
