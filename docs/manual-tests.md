@@ -1,6 +1,6 @@
 # Manual tests
 
-Goal: sanity-check auto selection + model bags end-to-end.
+Goal: sanity-check auto selection + presets end-to-end.
 
 ## Setup
 
@@ -21,11 +21,11 @@ Tip: use `--verbose` to see model attempts + the chosen model.
 - Missing-key skip (configure only one key; should skip other providers, still succeed):
   - Set only `OPENAI_API_KEY`, then run a website summary; should not try Gemini/Anthropic/XAI.
 
-## Model bags
+## Presets
 
-- Define a bag in `~/.summarize/config.json` (see `docs/config.md` → “Model bags”), then:
-  - `summarize --model <bag> --max-output-tokens 200 https://example.com`
-  - If the bag contains OpenRouter models, ensure `OPENROUTER_API_KEY` is set.
+- Define a preset in `~/.summarize/config.json` (see `docs/config.md` → “Presets”), then:
+  - `summarize --model <preset> --max-output-tokens 200 https://example.com`
+  - If the preset contains OpenRouter models, ensure `OPENROUTER_API_KEY` is set.
 
 ## Images
 

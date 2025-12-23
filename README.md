@@ -215,7 +215,7 @@ Also supported:
 
 - `model: { "mode": "auto" }` (automatic model selection + fallback; see `docs/model-auto.md`)
 - `model.rules` (customize candidates / ordering)
-- `models` (define named models selectable via `--model <name>`)
+- `models` (define presets selectable via `--model <preset>`)
 - `media.videoMode: "auto"|"transcript"|"understand"`
 
 Note: the config is parsed leniently (JSON5), but **comments are not allowed**.
@@ -242,7 +242,7 @@ OpenRouter (OpenAI-compatible):
 
 - Set `OPENROUTER_API_KEY=...`
 - Prefer forcing OpenRouter per model id: `--model openrouter/<author>/<slug>` (e.g. `openrouter/meta-llama/llama-3.1-8b-instruct:free`)
-- Built-in named model: `--model free` (uses a default bag of OpenRouter `:free` models). If it stops working, run `summarize generate-free` to refresh `models.free` in `~/.summarize/config.json`.
+- Built-in preset: `--model free` (uses a default set of OpenRouter `:free` models). If it stops working, run `summarize generate-free` to refresh `models.free` in `~/.summarize/config.json`.
 
 Example:
 

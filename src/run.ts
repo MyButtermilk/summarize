@@ -826,7 +826,7 @@ ${heading('Examples')}
   ${cmd('summarize "https://example.com" --extract --format md --markdown-mode llm')} ${dim('# extracted markdown via LLM')}
   ${cmd('summarize "https://www.youtube.com/watch?v=I845O57ZSy4&t=11s" --extract --youtube web')}
   ${cmd('summarize "https://example.com" --length 20k --max-output-tokens 2k --timeout 2m --model openai/gpt-5-mini')}
-  ${cmd('summarize "https://example.com" --model mymodel')} ${dim('# config-defined model name')}
+  ${cmd('summarize "https://example.com" --model mymodel')} ${dim('# config preset')}
   ${cmd('summarize "https://example.com" --json --verbose')}
 
 ${heading('Env Vars')}

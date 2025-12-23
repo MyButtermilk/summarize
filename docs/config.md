@@ -51,9 +51,9 @@ Shorthand (equivalent):
 }
 ```
 
-## Named models
+## Presets
 
-Define named models you can select via `--model <name>`:
+Define presets you can select via `--model <preset>`:
 
 ```json
 {
@@ -75,10 +75,10 @@ Define named models you can select via `--model <name>`:
 
 Notes:
 
-- `auto` is reserved and can’t be defined as a name.
+- `auto` is reserved and can’t be defined as a preset.
 - `free` is built-in (OpenRouter `:free` candidates). Override it by defining `models.free` in your config, or regenerate it via `summarize generate-free`.
 
-Use a named model as your default `model`:
+Use a preset as your default `model`:
 
 ```json
 {
@@ -88,7 +88,7 @@ Use a named model as your default `model`:
 
 Notes:
 
-- For named models, `"mode": "auto"` is optional when `"rules"` is present.
+- For presets, `"mode": "auto"` is optional when `"rules"` is present.
 
 For auto selection with rules:
 

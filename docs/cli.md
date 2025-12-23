@@ -79,9 +79,9 @@ Notes:
 - CLI output is treated as text only (no token accounting).
 - If a CLI call fails, auto mode falls back to the next candidate.
 
-## Generate free-model bag (OpenRouter)
+## Generate free preset (OpenRouter)
 
-`summarize` ships with a built-in named model `free`, backed by OpenRouter `:free` models.
+`summarize` ships with a built-in preset `free`, backed by OpenRouter `:free` models.
 To regenerate the candidate list (and persist it in your config):
 
 ```bash
