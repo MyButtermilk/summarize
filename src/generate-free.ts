@@ -114,6 +114,7 @@ type OpenRouterModelEntry = {
   contextLength: number | null
   maxCompletionTokens: number | null
   supportedParametersCount: number
+  modality: string | null
 }
 
 async function mapWithConcurrency<T, R>(
@@ -219,11 +220,21 @@ export async function generateFree({
         return sp.filter((v) => typeof v === 'string' && v.trim().length > 0).length
       })()
 
+      const modality = (() => {
+        const arch =
+          obj.architecture && typeof obj.architecture === 'object'
+            ? (obj.architecture as Record<string, unknown>)
+            : null
+        const raw = typeof arch?.modality === 'string' ? arch.modality.trim() : ''
+        return raw.length > 0 ? raw : null
+      })()
+
       return {
         id,
         contextLength,
         maxCompletionTokens,
         supportedParametersCount,
+        modality,
       } satisfies OpenRouterModelEntry
     })
     .filter((v): v is OpenRouterModelEntry => Boolean(v))
@@ -271,6 +282,7 @@ export async function generateFree({
     contextLength: number | null
     maxCompletionTokens: number | null
     supportedParametersCount: number
+    modality: string | null
   }
   type Result = { ok: true; value: Ok } | { ok: false; openrouterModelId: string; error: string }
 
@@ -343,6 +355,7 @@ export async function generateFree({
             contextLength: meta?.contextLength ?? null,
             maxCompletionTokens: meta?.maxCompletionTokens ?? null,
             supportedParametersCount: meta?.supportedParametersCount ?? 0,
+            modality: meta?.modality ?? null,
           },
         } satisfies Result
       } catch (error) {
@@ -514,8 +527,14 @@ export async function generateFree({
     const r = refinedById.get(modelId)
     if (!r) continue
     const avg = r.successCount > 0 ? r.totalLatencyMs / r.successCount : r.medianLatencyMs
+    const ctx = typeof r.contextLength === 'number' ? `ctx=${r.contextLength}` : null
+    const out =
+      typeof r.maxCompletionTokens === 'number' ? `out=${r.maxCompletionTokens}` : null
+    const modality = r.modality ? `modality=${r.modality}` : null
+    const sp = `supported_parameters=${r.supportedParametersCount}`
+    const meta = [ctx, out, modality, sp].filter(Boolean).join(' ')
     stderr.write(
-      `- ${modelId} ${dim(`avg ${formatMs(avg)} (n=${r.successCount})`)}\n`
+      `- ${modelId} ${dim(`avg ${formatMs(avg)} (n=${r.successCount})`)} ${dim(meta)}\n`
     )
   }
 }
