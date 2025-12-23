@@ -1082,7 +1082,7 @@ function writeFinishLine({
 
 function buildDetailedMetricsParts(report: ReturnType<typeof buildRunMetricsReport>): string[] {
   const calls = report.llm.reduce((sum, row) => sum + row.calls, 0)
-  if (calls <= 0) return []
+  if (calls <= 1) return []
   return [`calls=${calls.toLocaleString()}`]
 }
 
@@ -1122,18 +1122,17 @@ function buildDetailedLengthPartsForExtracted(extracted: {
   if (!isYouTube && !extracted.transcriptCharacters) return parts
 
   parts.push(
-    `len=${formatCompactCount(extracted.totalCharacters)}ch/${formatCompactCount(extracted.wordCount)}w`
+    `input=${formatCompactCount(extracted.totalCharacters)} chars (~${formatCompactCount(extracted.wordCount)} words)`
   )
 
   if (typeof extracted.transcriptCharacters === 'number' && extracted.transcriptCharacters > 0) {
     const wordEstimate = Math.max(0, Math.round(extracted.transcriptCharacters / 6))
     const minutesEstimate = Math.max(1, Math.round(wordEstimate / 160))
-    const trParts: string[] = [`tr=${formatCompactCount(extracted.transcriptCharacters)}ch`]
+    const details: string[] = [`${formatCompactCount(extracted.transcriptCharacters)} chars`]
     if (typeof extracted.transcriptLines === 'number' && extracted.transcriptLines > 0) {
-      trParts.push(`${formatCompactCount(extracted.transcriptLines)}ln`)
+      details.push(`${formatCompactCount(extracted.transcriptLines)} lines`)
     }
-    trParts.push(`~${minutesEstimate}m`)
-    parts.push(trParts.join('/'))
+    parts.push(`transcript=~${minutesEstimate}m (${details.join(', ')})`)
   }
 
   return parts

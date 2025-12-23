@@ -59,7 +59,7 @@ describe('--metrics detailed', () => {
     })
 
     expect(stderrText).toContain('Finished in')
-    expect(stderrText).toMatch(/\blen=/)
-    expect(stderrText).toMatch(/\btr=/)
+    expect(stderrText).toMatch(/\binput=/)
+    expect(stderrText).toMatch(/\btranscript=/)
   })
 })

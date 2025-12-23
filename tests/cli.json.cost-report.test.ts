@@ -100,7 +100,7 @@ describe('cli json + metrics report', () => {
     expect(stdoutText).not.toContain('estimatedUsd')
     expect(stdoutText).not.toContain('totalEstimatedUsd')
     expect(stderrText).toContain('Finished in')
-    expect(stderrText).toContain('calls=1')
+    expect(stderrText).not.toContain('calls=')
     expect(stderrText).toContain('tok(i/o/t)=10/1/11')
     expect(stderrText).not.toContain('metrics llm provider=')
     expect(stderrText).not.toContain('cost total')
