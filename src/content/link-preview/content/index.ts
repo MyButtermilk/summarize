@@ -50,6 +50,21 @@ function extractSpotifyEpisodeId(url: string): string | null {
   }
 }
 
+function extractApplePodcastIds(url: string): { showId: string; episodeId: string | null } | null {
+  try {
+    const parsed = new URL(url)
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, '')
+    if (host !== 'podcasts.apple.com') return null
+    const showId = parsed.pathname.match(/\/id(\d+)(?:\/|$)/)?.[1] ?? null
+    if (!showId) return null
+    const episodeIdRaw = parsed.searchParams.get('i')
+    const episodeId = episodeIdRaw && /^\d+$/.test(episodeIdRaw) ? episodeIdRaw : null
+    return { showId, episodeId }
+  } catch {
+    return null
+  }
+}
+
 function stripLeadingTitle(content: string, title: string | null | undefined): string {
   if (!(content && title)) {
     return content
@@ -179,6 +194,63 @@ export async function fetchLinkContent(
           used: false,
           provider: null,
           notes: 'Spotify short-circuit uses transcript content',
+        },
+        transcript: transcriptDiagnostics,
+      },
+    })
+  }
+
+  const appleIds = extractApplePodcastIds(url)
+  if (appleIds) {
+    if (!deps.openaiApiKey && !deps.falApiKey) {
+      throw new Error(
+        'Apple Podcasts transcription requires OPENAI_API_KEY or FAL_KEY (Whisper); otherwise you may only get a slow/blocked HTML page.'
+      )
+    }
+
+    const transcriptResolution = await resolveTranscriptForLink(url, null, deps, {
+      youtubeTranscriptMode,
+      cacheMode,
+    })
+    if (!transcriptResolution.text) {
+      const notes = transcriptResolution.diagnostics?.notes
+      const suffix = notes ? ` (${notes})` : ''
+      throw new Error(`Failed to transcribe Apple Podcasts episode${suffix}`)
+    }
+
+    const transcriptDiagnostics = ensureTranscriptDiagnostics(
+      transcriptResolution,
+      cacheMode ?? 'default'
+    )
+    transcriptDiagnostics.notes = appendNote(
+      transcriptDiagnostics.notes,
+      'Apple Podcasts: skipped HTML fetch (prefer iTunes lookup / enclosures)'
+    )
+
+    return finalizeExtractedLinkContent({
+      url,
+      baseContent: selectBaseContent('', transcriptResolution.text),
+      maxCharacters,
+      title: null,
+      description: null,
+      siteName: 'Apple Podcasts',
+      transcriptResolution,
+      video: null,
+      isVideoOnly: false,
+      diagnostics: {
+        strategy: 'html',
+        firecrawl: {
+          attempted: false,
+          used: false,
+          cacheMode,
+          cacheStatus: cacheMode === 'bypass' ? 'bypassed' : 'unknown',
+          notes: 'Apple Podcasts short-circuit skipped HTML/Firecrawl',
+        },
+        markdown: {
+          requested: markdownRequested,
+          used: false,
+          provider: null,
+          notes: 'Apple Podcasts short-circuit uses transcript content',
         },
         transcript: transcriptDiagnostics,
       },

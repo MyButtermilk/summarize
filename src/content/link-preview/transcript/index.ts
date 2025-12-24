@@ -84,6 +84,7 @@ export const resolveTranscriptForLink = async (
     ytDlpPath: deps.ytDlpPath,
     falApiKey: deps.falApiKey,
     openaiApiKey: deps.openaiApiKey,
+    onProgress: deps.onProgress ?? null,
     youtubeTranscriptMode: youtubeTranscriptMode ?? 'auto',
     onProgress: deps.onProgress ?? null,
   })

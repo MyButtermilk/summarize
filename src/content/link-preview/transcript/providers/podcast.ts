@@ -19,6 +19,7 @@ const MAX_REMOTE_MEDIA_BYTES = 512 * 1024 * 1024
 const BLOCKED_HTML_HINT_PATTERN =
   /access denied|attention required|captcha|recaptcha|cloudflare|forbidden|verify you are human/i
 const ITUNES_SEARCH_URL = 'https://itunes.apple.com/search'
+const ITUNES_LOOKUP_URL = 'https://itunes.apple.com/lookup'
 
 export const canHandle = ({ url, html }: ProviderContext): boolean => {
   if (typeof html === 'string' && looksLikeRssOrAtomFeed(html)) return true
@@ -49,10 +50,10 @@ export const fetchTranscript = async (
     attemptedProviders.push('whisper')
     try {
       // Spotify episode pages frequently trigger bot protection (captcha/recaptcha) and the
-      // episode audio itself is often DRM-protected. So we:
+      // episode audio itself is sometimes DRM-protected. So we:
       // - fetch the lightweight embed page for stable metadata (__NEXT_DATA__),
-      // - resolve the publisher RSS feed via Apple’s iTunes directory,
-      // - transcribe the RSS enclosure (usually an MP3 on the publisher CDN).
+      // - first try the embed-provided audio URL (works for many episodes),
+      // - then fall back to resolving the publisher RSS feed via Apple’s iTunes directory.
       const embedUrl = `https://open.spotify.com/embed/episode/${spotifyEpisodeId}`
       const { html: embedHtml, via } = await fetchSpotifyEmbedHtml({
         embedUrl,
@@ -67,6 +68,44 @@ export const fetchTranscript = async (
       }
       const showTitle = embedData.showTitle
       const episodeTitle = embedData.episodeTitle
+      const embedAudioUrl = embedData.audioUrl
+      const embedDurationSeconds = embedData.durationSeconds
+
+      if (embedAudioUrl) {
+        const result = await transcribeMediaUrl({
+          fetchImpl: options.fetch,
+          url: embedAudioUrl,
+          filenameHint: 'episode.mp4',
+          durationSecondsHint: embedDurationSeconds,
+          openaiApiKey: options.openaiApiKey,
+          falApiKey: options.falApiKey,
+          notes,
+          progress: { url: context.url, service: 'podcast', onProgress: options.onProgress ?? null },
+        })
+        if (result.text) {
+          notes.push(via === 'firecrawl' ? 'Resolved Spotify embed audio via Firecrawl' : 'Resolved Spotify embed audio')
+          return {
+            text: result.text,
+            source: 'whisper',
+            attemptedProviders,
+            notes: notes.length > 0 ? notes.join('; ') : null,
+            metadata: {
+              provider: 'podcast',
+              kind: 'spotify_embed_audio',
+              episodeId: spotifyEpisodeId,
+              showTitle,
+              episodeTitle,
+              audioUrl: embedAudioUrl,
+              durationSeconds: embedDurationSeconds,
+              drmFormat: embedData.drmFormat,
+              transcriptionProvider: result.provider,
+            },
+          }
+        }
+        notes.push(
+          `Spotify embed audio transcription failed; falling back to iTunes RSS: ${result.error?.message ?? 'unknown error'}`
+        )
+      }
 
       const feedUrl = await resolvePodcastFeedUrlFromItunesSearch(options.fetch, showTitle)
       if (!feedUrl) {
@@ -99,10 +138,10 @@ export const fetchTranscript = async (
         url: enclosureUrl,
         filenameHint: 'episode.mp3',
         durationSecondsHint: durationSeconds,
-        progress: { url: context.url, service: 'podcast', onProgress: options.onProgress ?? null },
         openaiApiKey: options.openaiApiKey,
         falApiKey: options.falApiKey,
         notes,
+        progress: { url: context.url, service: 'podcast', onProgress: options.onProgress ?? null },
       })
       if (result.text) {
         return {
@@ -154,6 +193,79 @@ export const fetchTranscript = async (
     }
   }
 
+  // Prefer embedded Apple Podcasts JSON when we have HTML (tests + legacy behavior).
+  // Only hit the iTunes lookup API when we don't have HTML (Apple Podcasts short-circuit).
+  const appleIds = typeof context.html !== 'string' ? extractApplePodcastIds(context.url) : null
+  if (appleIds) {
+    attemptedProviders.push('whisper')
+    try {
+      const episode = await resolveApplePodcastEpisodeFromItunesLookup({
+        fetchImpl: options.fetch,
+        showId: appleIds.showId,
+        episodeId: appleIds.episodeId,
+      })
+      if (!episode) {
+        throw new Error('iTunes lookup did not return an episodeUrl')
+      }
+
+      const result = await transcribeMediaUrl({
+        fetchImpl: options.fetch,
+        url: episode.episodeUrl,
+        filenameHint: episode.fileExtension ? `episode.${episode.fileExtension}` : 'episode.mp3',
+        durationSecondsHint: episode.durationSeconds,
+        openaiApiKey: options.openaiApiKey,
+        falApiKey: options.falApiKey,
+        notes,
+        progress: { url: context.url, service: 'podcast', onProgress: options.onProgress ?? null },
+      })
+
+      if (result.text) {
+        notes.push('Resolved Apple Podcasts episode via iTunes lookup')
+        return {
+          text: result.text,
+          source: 'whisper',
+          attemptedProviders,
+          notes: notes.length > 0 ? notes.join('; ') : null,
+          metadata: {
+            provider: 'podcast',
+            kind: 'apple_itunes_episode',
+            showId: appleIds.showId,
+            episodeId: appleIds.episodeId,
+            episodeUrl: episode.episodeUrl,
+            feedUrl: episode.feedUrl,
+            durationSeconds: episode.durationSeconds,
+            transcriptionProvider: result.provider,
+          },
+        }
+      }
+
+      return {
+        text: null,
+        source: null,
+        attemptedProviders,
+        notes: result.error?.message ?? null,
+        metadata: {
+          provider: 'podcast',
+          kind: 'apple_itunes_episode',
+          showId: appleIds.showId,
+          episodeId: appleIds.episodeId,
+          episodeUrl: episode.episodeUrl,
+          feedUrl: episode.feedUrl,
+          durationSeconds: episode.durationSeconds,
+          transcriptionProvider: result.provider,
+        },
+      }
+    } catch (error) {
+      return {
+        text: null,
+        source: null,
+        attemptedProviders,
+        notes: `Apple Podcasts iTunes lookup failed: ${error instanceof Error ? error.message : String(error)}`,
+        metadata: { provider: 'podcast', kind: 'apple_itunes_episode', showId: appleIds.showId },
+      }
+    }
+  }
+
   const appleStreamUrl =
     typeof context.html === 'string' ? extractEmbeddedJsonUrl(context.html, 'streamUrl') : null
   if (appleStreamUrl) {
@@ -163,10 +275,10 @@ export const fetchTranscript = async (
       url: appleStreamUrl,
       filenameHint: 'episode.mp3',
       durationSecondsHint: null,
-      progress: { url: context.url, service: 'podcast', onProgress: options.onProgress ?? null },
       openaiApiKey: options.openaiApiKey,
       falApiKey: options.falApiKey,
       notes,
+      progress: { url: context.url, service: 'podcast', onProgress: options.onProgress ?? null },
     })
     if (result.text) {
       return {
@@ -212,10 +324,10 @@ export const fetchTranscript = async (
           url: resolvedUrl,
           filenameHint: 'episode.mp3',
           durationSecondsHint: durationSeconds,
-          progress: { url: context.url, service: 'podcast', onProgress: options.onProgress ?? null },
           openaiApiKey: options.openaiApiKey,
           falApiKey: options.falApiKey,
           notes,
+          progress: { url: context.url, service: 'podcast', onProgress: options.onProgress ?? null },
         })
         if (result.text) {
           return {
@@ -269,10 +381,10 @@ export const fetchTranscript = async (
         url: resolvedUrl,
         filenameHint: 'episode.mp3',
         durationSecondsHint: durationSeconds,
-        progress: { url: context.url, service: 'podcast', onProgress: options.onProgress ?? null },
         openaiApiKey: options.openaiApiKey,
         falApiKey: options.falApiKey,
         notes,
+        progress: { url: context.url, service: 'podcast', onProgress: options.onProgress ?? null },
       })
       if (transcript.text) {
         return {
@@ -315,19 +427,19 @@ export const fetchTranscript = async (
 
   const ogAudioUrl =
     typeof context.html === 'string' ? extractOgAudioUrl(context.html) : null
-	  if (ogAudioUrl) {
-	    attemptedProviders.push('whisper')
-	    const result = await transcribeMediaUrl({
-	      fetchImpl: options.fetch,
-	      url: ogAudioUrl,
-	      filenameHint: 'audio.mp3',
-	      durationSecondsHint: null,
-	      progress: { url: context.url, service: 'podcast', onProgress: options.onProgress ?? null },
-	      openaiApiKey: options.openaiApiKey,
-	      falApiKey: options.falApiKey,
-	      notes,
-	    })
-	    if (result.text) {
+  if (ogAudioUrl) {
+    attemptedProviders.push('whisper')
+    const result = await transcribeMediaUrl({
+      fetchImpl: options.fetch,
+      url: ogAudioUrl,
+      filenameHint: 'audio.mp3',
+      durationSecondsHint: null,
+      openaiApiKey: options.openaiApiKey,
+      falApiKey: options.falApiKey,
+      notes,
+      progress: { url: context.url, service: 'podcast', onProgress: options.onProgress ?? null },
+    })
+    if (result.text) {
       notes.push('Used og:audio media (may be a preview clip, not the full episode)')
       return {
         text: result.text,
@@ -468,23 +580,132 @@ function extractSpotifyEpisodeId(url: string): string | null {
 
 function extractSpotifyEmbedData(
   html: string
-): { showTitle: string; episodeTitle: string; drmFormat: string | null } | null {
+): {
+  showTitle: string
+  episodeTitle: string
+  durationSeconds: number | null
+  drmFormat: string | null
+  audioUrl: string | null
+} | null {
   const match = html.match(/<script[^>]*id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i)
   if (!match?.[1]) return null
   try {
     const json = JSON.parse(match[1]) as any
-    const entity = json?.props?.pageProps?.state?.data?.entity ?? null
+    const state = json?.props?.pageProps?.state?.data ?? null
+    const entity = state?.entity ?? null
     const showTitle = typeof entity?.subtitle === 'string' ? entity.subtitle.trim() : ''
     const episodeTitle = typeof entity?.title === 'string' ? entity.title.trim() : ''
+    const durationMs = typeof entity?.duration === 'number' ? entity.duration : null
     const drmFormat =
-      typeof entity?.defaultAudioFileObject?.format === 'string'
-        ? String(entity.defaultAudioFileObject.format)
+      typeof state?.defaultAudioFileObject?.format === 'string'
+        ? String(state.defaultAudioFileObject.format)
         : null
+    const audioUrl = pickSpotifyEmbedAudioUrl(state?.defaultAudioFileObject?.url)
     if (!showTitle || !episodeTitle) return null
-    return { showTitle, episodeTitle, drmFormat }
+    return {
+      showTitle,
+      episodeTitle,
+      durationSeconds: typeof durationMs === 'number' && Number.isFinite(durationMs) ? durationMs / 1000 : null,
+      drmFormat,
+      audioUrl,
+    }
   } catch {
     return null
   }
+}
+
+function pickSpotifyEmbedAudioUrl(raw: unknown): string | null {
+  const urls: string[] = Array.isArray(raw) ? raw.filter((v) => typeof v === 'string') : []
+  const normalized = urls.map((u) => u.trim()).filter((u) => /^https?:\/\//i.test(u))
+  if (normalized.length === 0) return null
+  const scdn = normalized.find((u) => /scdn\.co/i.test(u))
+  return scdn ?? normalized[0] ?? null
+}
+
+function extractApplePodcastIds(url: string): { showId: string; episodeId: string | null } | null {
+  try {
+    const parsed = new URL(url)
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, '')
+    if (host !== 'podcasts.apple.com') return null
+    const showId = parsed.pathname.match(/\/id(\d+)(?:\/|$)/)?.[1] ?? null
+    if (!showId) return null
+    const episodeIdRaw = parsed.searchParams.get('i')
+    const episodeId = episodeIdRaw && /^\d+$/.test(episodeIdRaw) ? episodeIdRaw : null
+    return { showId, episodeId }
+  } catch {
+    return null
+  }
+}
+
+async function resolveApplePodcastEpisodeFromItunesLookup({
+  fetchImpl,
+  showId,
+  episodeId,
+}: {
+  fetchImpl: typeof fetch
+  showId: string
+  episodeId: string | null
+}): Promise<{
+  episodeUrl: string
+  feedUrl: string | null
+  fileExtension: string | null
+  durationSeconds: number | null
+} | null> {
+  const query = new URLSearchParams({
+    id: showId,
+    entity: 'podcastEpisode',
+    limit: '200',
+  })
+  const res = await fetchImpl(`${ITUNES_LOOKUP_URL}?${query.toString()}`, {
+    redirect: 'follow',
+    signal: AbortSignal.timeout(TRANSCRIPTION_TIMEOUT_MS),
+    headers: { accept: 'application/json' },
+  })
+  if (!res.ok) return null
+  const payload = (await res.json()) as any
+  const results: any[] = Array.isArray(payload?.results) ? payload.results : []
+
+  const show = results.find((r) => r?.wrapperType === 'track' && r?.kind === 'podcast')
+  const feedUrl = typeof show?.feedUrl === 'string' && show.feedUrl.trim() ? show.feedUrl.trim() : null
+
+  const episodes = results.filter((r) => r?.wrapperType === 'podcastEpisode')
+  if (episodes.length === 0) return null
+
+  const chosen = (() => {
+    if (episodeId) {
+      const match = episodes.find((r) => String(r?.trackId ?? '') === episodeId)
+      if (match) return match
+    }
+    // No i=... in URL: pick the newest episode by release date.
+    const sorted = [...episodes].sort((a, b) => {
+      const aDate = Date.parse(String(a?.releaseDate ?? ''))
+      const bDate = Date.parse(String(b?.releaseDate ?? ''))
+      if (!Number.isFinite(aDate) && !Number.isFinite(bDate)) return 0
+      if (!Number.isFinite(aDate)) return 1
+      if (!Number.isFinite(bDate)) return -1
+      return bDate - aDate
+    })
+    return sorted[0]
+  })()
+
+  const episodeUrlRaw =
+    typeof chosen?.episodeUrl === 'string'
+      ? chosen.episodeUrl.trim()
+      : typeof chosen?.previewUrl === 'string'
+        ? chosen.previewUrl.trim()
+        : ''
+  if (!episodeUrlRaw || !/^https?:\/\//i.test(episodeUrlRaw)) return null
+
+  const fileExtension =
+    typeof chosen?.episodeFileExtension === 'string' && chosen.episodeFileExtension.trim()
+      ? chosen.episodeFileExtension.trim().replace(/^\./, '')
+      : null
+  const durationSeconds =
+    typeof chosen?.trackTimeMillis === 'number' && Number.isFinite(chosen.trackTimeMillis)
+      ? chosen.trackTimeMillis / 1000
+      : null
+
+  return { episodeUrl: episodeUrlRaw, feedUrl, fileExtension, durationSeconds }
 }
 
 async function resolvePodcastFeedUrlFromItunesSearch(
@@ -657,21 +878,23 @@ async function transcribeMediaUrl({
   url,
   filenameHint,
   durationSecondsHint,
-  progress,
   openaiApiKey,
   falApiKey,
   notes,
+  progress,
 }: {
   fetchImpl: typeof fetch
   url: string
   filenameHint: string
   durationSecondsHint: number | null
-  progress: { url: string; service: 'podcast'; onProgress: ProviderFetchOptions['onProgress'] } | null
   openaiApiKey: string | null
   falApiKey: string | null
   notes: string[]
+  progress: { url: string; service: 'podcast'; onProgress: ProviderFetchOptions['onProgress'] | null } | null
 }): Promise<{ text: string | null; provider: string | null; error: Error | null }> {
   const canChunk = await isFfmpegAvailable()
+  const providerHint: 'openai' | 'fal' | 'openai->fal' | 'unknown' =
+    openaiApiKey && falApiKey ? 'openai->fal' : openaiApiKey ? 'openai' : falApiKey ? 'fal' : 'unknown'
 
   const head = await probeRemoteMedia(fetchImpl, url)
   if (head.contentLength !== null && head.contentLength > MAX_REMOTE_MEDIA_BYTES) {
@@ -691,9 +914,6 @@ async function transcribeMediaUrl({
     mediaUrl: url,
     totalBytes,
   })
-
-  const providerHint: 'openai' | 'fal' | 'openai->fal' | 'unknown' =
-    openaiApiKey && falApiKey ? 'openai->fal' : openaiApiKey ? 'openai' : falApiKey ? 'fal' : 'unknown'
 
   if (!canChunk) {
     const bytes = await downloadCappedBytes(fetchImpl, url, MAX_OPENAI_UPLOAD_BYTES, {
@@ -729,6 +949,7 @@ async function transcribeMediaUrl({
       filename,
       openaiApiKey,
       falApiKey,
+      onProgress: null,
     })
     if (transcript.notes.length > 0) notes.push(...transcript.notes)
     return { text: transcript.text, provider: transcript.provider, error: transcript.error }
@@ -767,6 +988,7 @@ async function transcribeMediaUrl({
       filename,
       openaiApiKey,
       falApiKey,
+      onProgress: null,
     })
     if (transcript.notes.length > 0) notes.push(...transcript.notes)
     return { text: transcript.text, provider: transcript.provider, error: transcript.error }
@@ -872,6 +1094,7 @@ async function downloadCappedBytes(
   const reader = body.getReader()
   const chunks: Uint8Array[] = []
   let total = 0
+  let lastReported = 0
   try {
     while (total < maxBytes) {
       const { value, done } = await reader.read()
@@ -881,12 +1104,16 @@ async function downloadCappedBytes(
       const next = value.byteLength > remaining ? value.slice(0, remaining) : value
       chunks.push(next)
       total += next.byteLength
-      options?.onProgress?.(total)
+      if (total - lastReported >= 64 * 1024) {
+        lastReported = total
+        options?.onProgress?.(total)
+      }
       if (total >= maxBytes) break
     }
   } finally {
     await reader.cancel().catch(() => {})
   }
+  options?.onProgress?.(total)
 
   const out = new Uint8Array(total)
   let offset = 0
@@ -919,25 +1146,30 @@ async function downloadToFile(
   }
 
   const handle = await fs.open(filePath, 'w')
+  let downloadedBytes = 0
+  let lastReported = 0
   try {
     const reader = body.getReader()
     try {
-      let total = 0
       while (true) {
         const { value, done } = await reader.read()
         if (done) break
         if (!value) continue
         await handle.write(value)
-        total += value.byteLength
-        options?.onProgress?.(total)
+        downloadedBytes += value.byteLength
+        if (downloadedBytes - lastReported >= 128 * 1024) {
+          lastReported = downloadedBytes
+          options?.onProgress?.(downloadedBytes)
+        }
       }
-      return total
+      options?.onProgress?.(downloadedBytes)
     } finally {
       await reader.cancel().catch(() => {})
     }
   } finally {
     await handle.close().catch(() => {})
   }
+  return downloadedBytes
 }
 
 function normalizeHeaderType(value: string | null): string | null {
@@ -973,4 +1205,19 @@ function formatBytes(bytes: number): string {
   }
   const decimals = value >= 10 || idx === 0 ? 0 : 1
   return `${value.toFixed(decimals)}${units[idx]}`
+}
+
+// Test-only exports (not part of the public API; may change without notice).
+export const __test__ = {
+  probeRemoteMedia,
+  downloadCappedBytes,
+  downloadToFile,
+  normalizeHeaderType,
+  parseContentLength,
+  filenameFromUrl,
+  looksLikeBlockedHtml,
+  extractItemDurationSeconds,
+  extractEnclosureForEpisode,
+  resolvePodcastFeedUrlFromItunesSearch,
+  formatBytes,
 }

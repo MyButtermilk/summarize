@@ -203,6 +203,7 @@ export function finalizeExtractedLinkContent({
     transcriptWordCount,
     transcriptSource: transcriptResolution.source,
     transcriptionProvider,
+    transcriptMetadata: transcriptResolution.metadata ?? null,
     mediaDurationSeconds,
     video,
     isVideoOnly,

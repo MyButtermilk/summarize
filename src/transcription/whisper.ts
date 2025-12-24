@@ -29,19 +29,20 @@ export type WhisperProgressEvent = {
   /** Best-effort total duration of the source media. */
   totalDurationSeconds: number | null
 }
-
 export async function transcribeMediaWithWhisper({
   bytes,
   mediaType,
   filename,
   openaiApiKey,
   falApiKey,
+  onProgress,
 }: {
   bytes: Uint8Array
   mediaType: string
   filename: string | null
   openaiApiKey: string | null
   falApiKey: string | null
+  onProgress?: ((event: WhisperProgressEvent) => void) | null
 }): Promise<WhisperTranscriptionResult> {
   const notes: string[] = []
 
@@ -67,6 +68,7 @@ export async function transcribeMediaWithWhisper({
           openaiApiKey,
           falApiKey,
           segmentSeconds: DEFAULT_SEGMENT_SECONDS,
+          onProgress,
         })
         return chunked
       } finally {
@@ -269,6 +271,7 @@ export async function transcribeMediaFileWithWhisper({
           filename: name,
           openaiApiKey,
           falApiKey,
+          onProgress: null,
         })
         if (!usedProvider && result.provider) usedProvider = result.provider
         if (result.error && !result.text) {
