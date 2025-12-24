@@ -62,6 +62,12 @@ export type ModelConfig =
 export type SummarizeConfig = {
   model?: ModelConfig
   /**
+   * Output language for summaries (default: English).
+   *
+   * Examples: "en", "de", "english", "german", "pt-BR".
+   */
+  language?: string
+  /**
    * Named model presets selectable via `--model <name>`.
    *
    * Note: `auto` is reserved and cannot be defined here.
@@ -431,6 +437,19 @@ export function loadSummarizeConfig({ env }: { env: Record<string, string | unde
     return parseModelConfig(parsed.model, 'model')
   })()
 
+  const language = (() => {
+    const value = parsed.language
+    if (typeof value === 'undefined') return undefined
+    if (typeof value !== 'string') {
+      throw new Error(`Invalid config file ${path}: "language" must be a string.`)
+    }
+    const trimmed = value.trim()
+    if (!trimmed) {
+      throw new Error(`Invalid config file ${path}: "language" must not be empty.`)
+    }
+    return trimmed
+  })()
+
   const models = (() => {
     const root = parsed as Record<string, unknown>
     if (typeof root.bags !== 'undefined') {
@@ -551,6 +570,7 @@ export function loadSummarizeConfig({ env }: { env: Record<string, string | unde
   return {
     config: {
       ...(model ? { model } : {}),
+      ...(language ? { language } : {}),
       ...(models ? { models } : {}),
       ...(media ? { media } : {}),
       ...(cli ? { cli } : {}),

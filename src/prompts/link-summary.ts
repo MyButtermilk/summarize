@@ -82,6 +82,7 @@ export function buildLinkSummaryPrompt({
   content,
   truncated,
   hasTranscript,
+  outputLanguage,
   summaryLength,
   shares,
 }: {
@@ -92,6 +93,7 @@ export function buildLinkSummaryPrompt({
   content: string
   truncated: boolean
   hasTranscript: boolean
+  outputLanguage: string
   summaryLength: SummaryLengthTarget
   shares: ShareContextEntry[]
 }): string {
@@ -164,7 +166,7 @@ export function buildLinkSummaryPrompt({
 
   const sharesBlock = shares.length > 0 ? `Tweets from sharers:\n${shareLines.join('\n')}\n\n` : ''
 
-  return `${audienceLine} ${directive.guidance} ${directive.formatting} ${maxCharactersLine} ${contentLengthLine} Keep the response compact by avoiding blank lines between sentences or list items; use only the single newlines required by the formatting instructions. Do not use emojis, disclaimers, or speculation. Write in direct, factual language. Format the answer in Markdown and obey the length-specific formatting above. Base everything strictly on the provided content and never invent details. ${shareGuidance}
+  return `${audienceLine} Write the response in ${outputLanguage}. ${directive.guidance} ${directive.formatting} ${maxCharactersLine} ${contentLengthLine} Keep the response compact by avoiding blank lines between sentences or list items; use only the single newlines required by the formatting instructions. Do not use emojis, disclaimers, or speculation. Write in direct, factual language. Format the answer in Markdown and obey the length-specific formatting above. Base everything strictly on the provided content and never invent details. ${shareGuidance}
 
 ${contextHeader}
 

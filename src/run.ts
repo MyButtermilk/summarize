@@ -42,6 +42,7 @@ import { generateTextWithModelId, streamTextWithModelId } from './llm/generate-t
 import { resolveGoogleModelForUsage } from './llm/google-models.js'
 import { createHtmlToMarkdownConverter } from './llm/html-to-markdown.js'
 import { parseGatewayStyleModelId } from './llm/model-id.js'
+import { resolveOutputLanguage } from './language.js'
 import { convertToMarkdownWithMarkitdown, type ExecFileFn } from './markitdown.js'
 import { buildAutoModelAttempts } from './model-auto.js'
 import { type FixedModelSpec, parseRequestedModelId, type RequestedModel } from './model-spec.js'
@@ -353,6 +354,7 @@ type JsonOutput = {
     length: { kind: 'preset'; preset: string } | { kind: 'chars'; maxCharacters: number }
     maxOutputTokens: number | null
     model: string
+    language: string
   } & (
     | {
         kind: 'url'
@@ -475,6 +477,11 @@ function buildProgram() {
       '--timeout <duration>',
       'Timeout for content fetching and LLM request: 30 (seconds), 30s, 2m, 5000ms',
       '2m'
+    )
+    .option(
+      '--language, --lang <language>',
+      'Output language (default: English). Examples: en, de, english, german, spanish.',
+      undefined
     )
     .option('--retries <count>', 'LLM retry attempts on timeout (default: 1).', '1')
     .option(
@@ -1362,6 +1369,13 @@ export async function runCli(
     program.opts().maxOutputTokens as string | undefined
   )
   const timeoutMs = parseDurationMs(program.opts().timeout as string)
+  const languageExplicitlySet = normalizedArgv.some(
+    (arg) =>
+      arg === '--language' ||
+      arg.startsWith('--language=') ||
+      arg === '--lang' ||
+      arg.startsWith('--lang=')
+  )
   const retries = parseRetriesArg(program.opts().retries as string)
   const extractMode = Boolean(program.opts().extract) || Boolean(program.opts().extractOnly)
   const json = Boolean(program.opts().json)
@@ -1418,6 +1432,13 @@ export async function runCli(
       : modelArg
 
   const { config, path: configPath } = loadSummarizeConfig({ env })
+  const resolvedLanguage = resolveOutputLanguage(
+    languageExplicitlySet
+      ? ((program.opts().language as string | undefined) ?? null)
+      : ((config?.language as string | undefined) ??
+          (program.opts().language as string | undefined) ??
+          null)
+  )
   const videoMode = parseVideoMode(
     videoModeExplicitlySet
       ? (program.opts().videoMode as string)
@@ -2208,6 +2229,7 @@ export async function runCli(
       promptText = buildFileSummaryPrompt({
         filename: attachment.filename,
         mediaType: attachment.mediaType,
+        outputLanguage: resolvedLanguage.label,
         summaryLength: summaryLengthTarget,
         contentLength: textContent?.content.length ?? null,
       })
@@ -2219,6 +2241,7 @@ export async function runCli(
         filename: attachment.filename,
         originalMediaType: attachment.mediaType,
         contentMediaType: 'text/markdown',
+        outputLanguage: resolvedLanguage.label,
         summaryLength: summaryLengthTarget,
         contentLength: markdown.length,
       })
@@ -2424,6 +2447,7 @@ export async function runCli(
           filePath,
           filename: attachment.filename,
           mediaType: attachment.mediaType,
+          outputLanguage: resolvedLanguage.label,
           summaryLength: summaryLengthTarget,
         }),
         allowTools: true,
@@ -2565,6 +2589,7 @@ export async function runCli(
                   : { kind: 'chars', maxCharacters: lengthArg.maxCharacters },
               maxOutputTokens: maxOutputTokensArg,
               model: requestedModelLabel,
+              language: resolvedLanguage.tag,
             }
           : {
               kind: 'asset-url',
@@ -2576,6 +2601,7 @@ export async function runCli(
                   : { kind: 'chars', maxCharacters: lengthArg.maxCharacters },
               maxOutputTokens: maxOutputTokensArg,
               model: requestedModelLabel,
+              language: resolvedLanguage.tag,
             }
       const payload: JsonOutput = {
         input,
@@ -3267,6 +3293,7 @@ export async function runCli(
       hasTranscript:
         isYouTube ||
         (extracted.transcriptSource !== null && extracted.transcriptSource !== 'unavailable'),
+      outputLanguage: resolvedLanguage.label,
       summaryLength:
         lengthArg.kind === 'preset' ? lengthArg.preset : { maxCharacters: lengthArg.maxCharacters },
       shares: [],
@@ -3291,6 +3318,7 @@ export async function runCli(
                 : { kind: 'chars', maxCharacters: lengthArg.maxCharacters },
             maxOutputTokens: maxOutputTokensArg,
             model: requestedModelLabel,
+            language: resolvedLanguage.tag,
           },
           env: {
             hasXaiKey: Boolean(xaiApiKey),
@@ -3376,6 +3404,7 @@ export async function runCli(
                 : { kind: 'chars', maxCharacters: lengthArg.maxCharacters },
             maxOutputTokens: maxOutputTokensArg,
             model: requestedModelLabel,
+            language: resolvedLanguage.tag,
           },
           env: {
             hasXaiKey: Boolean(xaiApiKey),
@@ -3613,6 +3642,7 @@ export async function runCli(
                 : { kind: 'chars', maxCharacters: lengthArg.maxCharacters },
             maxOutputTokens: maxOutputTokensArg,
             model: requestedModelLabel,
+            language: resolvedLanguage.tag,
           },
           env: {
             hasXaiKey: Boolean(xaiApiKey),
@@ -3661,6 +3691,7 @@ export async function runCli(
               : { kind: 'chars', maxCharacters: lengthArg.maxCharacters },
           maxOutputTokens: maxOutputTokensArg,
           model: requestedModelLabel,
+          language: resolvedLanguage.tag,
         },
         env: {
           hasXaiKey: Boolean(xaiApiKey),

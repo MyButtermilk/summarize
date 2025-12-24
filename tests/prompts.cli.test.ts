@@ -9,6 +9,7 @@ describe('buildPathSummaryPrompt', () => {
       filePath: '/tmp/notes.md',
       filename: 'notes.md',
       mediaType: 'text/markdown',
+      outputLanguage: 'English',
       summaryLength: { maxCharacters: 12_345 },
     })
 
@@ -25,6 +26,7 @@ describe('buildPathSummaryPrompt', () => {
       filePath: '/tmp/photo.jpg',
       filename: null,
       mediaType: null,
+      outputLanguage: 'English',
       summaryLength: 'short',
     })
 

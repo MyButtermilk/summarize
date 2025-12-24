@@ -7,6 +7,7 @@ describe('buildFileSummaryPrompt', () => {
     const prompt = buildFileSummaryPrompt({
       filename: 'paper.pdf',
       mediaType: 'application/pdf',
+      outputLanguage: 'English',
       summaryLength: 'short',
     })
 
@@ -19,6 +20,7 @@ describe('buildFileSummaryPrompt', () => {
     const prompt = buildFileSummaryPrompt({
       filename: null,
       mediaType: null,
+      outputLanguage: 'English',
       summaryLength: { maxCharacters: 20_000 },
       contentLength: 120,
     })
@@ -34,6 +36,7 @@ describe('buildFileSummaryPrompt', () => {
     const prompt = buildFileSummaryPrompt({
       filename: 'report.txt',
       mediaType: 'text/plain',
+      outputLanguage: 'English',
       summaryLength: { maxCharacters: 10_000 },
       contentLength: 120,
     })
@@ -46,6 +49,7 @@ describe('buildFileSummaryPrompt', () => {
     const prompt = buildFileSummaryPrompt({
       filename: null,
       mediaType: null,
+      outputLanguage: 'English',
       summaryLength: 'short',
       contentLength: 0,
     })
@@ -62,6 +66,7 @@ describe('buildFileTextSummaryPrompt', () => {
       filename: 'notes.txt',
       originalMediaType: 'text/plain',
       contentMediaType: 'text/markdown',
+      outputLanguage: 'English',
       summaryLength: { maxCharacters: 10_000 },
       contentLength: 300,
     })
@@ -77,6 +82,7 @@ describe('buildFileTextSummaryPrompt', () => {
       filename: null,
       originalMediaType: null,
       contentMediaType: 'text/plain',
+      outputLanguage: 'English',
       summaryLength: 'short',
       contentLength: 120,
     })

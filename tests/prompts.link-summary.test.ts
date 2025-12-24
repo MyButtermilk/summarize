@@ -11,10 +11,12 @@ describe('buildLinkSummaryPrompt', () => {
       content: 'Body',
       truncated: false,
       hasTranscript: false,
+      outputLanguage: 'English',
       summaryLength: 'short',
       shares: [],
     })
 
+    expect(prompt).toContain('Write the response in English.')
     expect(prompt).toContain('Source URL: https://example.com')
     expect(prompt).toContain('Title: Hello')
     expect(prompt).toContain('Site: Example')
@@ -33,6 +35,7 @@ describe('buildLinkSummaryPrompt', () => {
       content: 'Body',
       truncated: false,
       hasTranscript: false,
+      outputLanguage: 'English',
       summaryLength: { maxCharacters: 20_000 },
       shares: [],
     })
@@ -50,6 +53,7 @@ describe('buildLinkSummaryPrompt', () => {
       content: 'Body',
       truncated: true,
       hasTranscript: true,
+      outputLanguage: 'German',
       summaryLength: 'xl',
       shares: [
         {
@@ -64,6 +68,7 @@ describe('buildLinkSummaryPrompt', () => {
       ],
     })
 
+    expect(prompt).toContain('Write the response in German.')
     expect(prompt).toContain('Note: Content truncated')
     expect(prompt).toContain('Tweets from sharers:')
     expect(prompt).toContain(

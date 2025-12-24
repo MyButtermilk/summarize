@@ -3,11 +3,13 @@ import type { SummaryLengthTarget } from './link-summary.js'
 export function buildFileSummaryPrompt({
   filename,
   mediaType,
+  outputLanguage,
   summaryLength,
   contentLength,
 }: {
   filename: string | null
   mediaType: string | null
+  outputLanguage: string
   summaryLength: SummaryLengthTarget
   contentLength?: number | null
 }): string {
@@ -34,7 +36,7 @@ export function buildFileSummaryPrompt({
     mediaType ? `Media type: ${mediaType}` : null,
   ].filter(Boolean)
 
-  const prompt = `You summarize files for curious users. Summarize the attached file. Be factual and do not invent details. Format the answer in Markdown. Do not use emojis. ${maxCharactersLine} ${contentLengthLine}
+  const prompt = `You summarize files for curious users. Write the response in ${outputLanguage}. Summarize the attached file. Be factual and do not invent details. Format the answer in Markdown. Do not use emojis. ${maxCharactersLine} ${contentLengthLine}
 
 ${headerLines.length > 0 ? `${headerLines.join('\n')}\n\n` : ''}Return only the summary.`
 
@@ -45,12 +47,14 @@ export function buildFileTextSummaryPrompt({
   filename,
   originalMediaType,
   contentMediaType,
+  outputLanguage,
   summaryLength,
   contentLength,
 }: {
   filename: string | null
   originalMediaType: string | null
   contentMediaType: string
+  outputLanguage: string
   summaryLength: SummaryLengthTarget
   contentLength: number
 }): string {
@@ -72,7 +76,7 @@ export function buildFileTextSummaryPrompt({
     `Extracted content length: ${contentLength.toLocaleString()} characters. Hard limit: never exceed this length. If the requested length is larger, do not pad—finish early rather than adding filler.`,
   ].filter(Boolean)
 
-  return `You summarize files for curious users. Summarize the file content below. Be factual and do not invent details. Format the answer in Markdown. Do not use emojis. ${maxCharactersLine}
+  return `You summarize files for curious users. Write the response in ${outputLanguage}. Summarize the file content below. Be factual and do not invent details. Format the answer in Markdown. Do not use emojis. ${maxCharactersLine}
 
 ${headerLines.length > 0 ? `${headerLines.join('\n')}\n\n` : ''}Return only the summary.`
 }

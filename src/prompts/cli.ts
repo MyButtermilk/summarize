@@ -11,12 +11,14 @@ export function buildPathSummaryPrompt({
   filePath,
   filename,
   mediaType,
+  outputLanguage,
   summaryLength,
 }: {
   kindLabel: 'file' | 'image'
   filePath: string
   filename: string | null
   mediaType: string | null
+  outputLanguage: string
   summaryLength: SummaryLengthTarget
 }): string {
   const headerLines = [
@@ -26,7 +28,7 @@ export function buildPathSummaryPrompt({
   ].filter(Boolean)
 
   const maxCharactersLine = formatTargetLength(summaryLength)
-  return `You summarize ${kindLabel === 'image' ? 'images' : 'files'} for curious users. Summarize the ${kindLabel} at the path below. Be factual and do not invent details. Format the answer in Markdown. Do not use emojis. ${maxCharactersLine}
+  return `You summarize ${kindLabel === 'image' ? 'images' : 'files'} for curious users. Write the response in ${outputLanguage}. Summarize the ${kindLabel} at the path below. Be factual and do not invent details. Format the answer in Markdown. Do not use emojis. ${maxCharactersLine}
 
 ${headerLines.length > 0 ? `${headerLines.join('\n')}\n\n` : ''}Return only the summary.`
 }
