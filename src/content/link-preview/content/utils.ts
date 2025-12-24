@@ -33,6 +33,14 @@ function resolveMediaDurationSecondsFromTranscriptMetadata(
   return null
 }
 
+function resolveTranscriptionProviderFromTranscriptMetadata(
+  metadata: Record<string, unknown> | null | undefined
+): string | null {
+  if (!metadata) return null
+  const provider = (metadata as { transcriptionProvider?: unknown }).transcriptionProvider
+  return typeof provider === 'string' && provider.trim().length > 0 ? provider.trim() : null
+}
+
 export function resolveCacheMode(options?: FetchLinkContentOptions) {
   return options?.cacheMode ?? DEFAULT_CACHE_MODE
 }
@@ -174,6 +182,9 @@ export function finalizeExtractedLinkContent({
   const { transcriptCharacters, transcriptLines, transcriptWordCount } = summarizeTranscript(
     transcriptResolution.text
   )
+  const transcriptionProvider = resolveTranscriptionProviderFromTranscriptMetadata(
+    transcriptResolution.metadata
+  )
   const mediaDurationSeconds = resolveMediaDurationSecondsFromTranscriptMetadata(
     transcriptResolution.metadata
   )
@@ -191,6 +202,7 @@ export function finalizeExtractedLinkContent({
     transcriptLines,
     transcriptWordCount,
     transcriptSource: transcriptResolution.source,
+    transcriptionProvider,
     mediaDurationSeconds,
     video,
     isVideoOnly,

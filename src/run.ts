@@ -1110,19 +1110,29 @@ function writeFinishLine({
 
   stderr.write('\n')
   stderr.write(`${ansi('1;32', line1, color)}\n`)
-  if (detailed) {
-    const lenParts =
-      extraParts?.filter((part) => part.startsWith('input=') || part.startsWith('transcript=')) ??
-      []
-    const miscParts =
-      extraParts?.filter((part) => !part.startsWith('input=') && !part.startsWith('transcript=')) ??
-      []
+  const lenParts =
+    extraParts?.filter((part) => part.startsWith('input=') || part.startsWith('transcript=')) ?? []
+  const miscParts =
+    extraParts?.filter((part) => !part.startsWith('input=') && !part.startsWith('transcript=')) ??
+    []
 
+  // Metrics "on": keep it short; show transcript length when we have one.
+  if (!detailed) {
+    const transcriptParts = lenParts.filter((part) => part.startsWith('transcript='))
+    if (transcriptParts.length > 0) {
+      stderr.write(`${ansi('0;90', `len ${transcriptParts.join(' ')}`, color)}\n`)
+    }
+    return
+  }
+
+  if (detailed) {
     const line2Segments: string[] = []
     if (lenParts.length > 0) {
       line2Segments.push(`len ${lenParts.join(' ')}`)
     }
-    line2Segments.push(`calls=${totalCalls.toLocaleString()}`)
+    if (totalCalls !== 1) {
+      line2Segments.push(`calls=${totalCalls.toLocaleString()}`)
+    }
     if (report.services.firecrawl.requests > 0 || report.services.apify.requests > 0) {
       const svcParts: string[] = []
       if (report.services.firecrawl.requests > 0) {
@@ -1171,6 +1181,26 @@ function formatDurationSecondsSmart(value: number): string {
   return parts.join(' ')
 }
 
+function buildBasicLengthPartsForExtracted(extracted: {
+  transcriptCharacters: number | null
+  transcriptWordCount: number | null
+  mediaDurationSeconds: number | null
+}): string[] {
+  if (typeof extracted.transcriptCharacters !== 'number' || extracted.transcriptCharacters <= 0) {
+    return []
+  }
+
+  const wordEstimate = Math.max(0, Math.round(extracted.transcriptCharacters / 6))
+  const transcriptWords = extracted.transcriptWordCount ?? wordEstimate
+  const minutesEstimate = Math.max(1, Math.round(transcriptWords / 160))
+  const durationPart =
+    typeof extracted.mediaDurationSeconds === 'number' && extracted.mediaDurationSeconds > 0
+      ? formatDurationSecondsSmart(extracted.mediaDurationSeconds)
+      : `~${minutesEstimate}m`
+
+  return [`transcript=${durationPart} (~${formatCompactCount(transcriptWords)} words)`]
+}
+
 function buildDetailedLengthPartsForExtracted(extracted: {
   url: string
   siteName: string | null
@@ -1179,7 +1209,10 @@ function buildDetailedLengthPartsForExtracted(extracted: {
   transcriptCharacters: number | null
   transcriptLines: number | null
   transcriptWordCount: number | null
+  transcriptSource: string | null
+  transcriptionProvider: string | null
   mediaDurationSeconds: number | null
+  diagnostics: { transcript: { cacheStatus: string } }
 }): string[] {
   const parts: string[] = []
 
@@ -1213,6 +1246,23 @@ function buildDetailedLengthPartsForExtracted(extracted: {
         : `~${minutesEstimate}m`
 
     parts.push(`transcript=${durationPart} (${details.join(', ')})`)
+  }
+
+  const hasTranscript =
+    typeof extracted.transcriptCharacters === 'number' && extracted.transcriptCharacters > 0
+  if (hasTranscript && extracted.transcriptSource) {
+    const providerSuffix =
+      extracted.transcriptSource === 'whisper' &&
+      extracted.transcriptionProvider &&
+      extracted.transcriptionProvider.trim().length > 0
+        ? `/${extracted.transcriptionProvider.trim()}`
+        : ''
+    const cacheStatus = extracted.diagnostics?.transcript?.cacheStatus
+    const cachePart =
+      typeof cacheStatus === 'string' && cacheStatus !== 'unknown' ? cacheStatus : null
+    const txParts: string[] = [`tx=${extracted.transcriptSource}${providerSuffix}`]
+    if (cachePart) txParts.push(`cache=${cachePart}`)
+    parts.push(txParts.join(' '))
   }
 
   return parts
@@ -1957,12 +2007,15 @@ export async function runCli(
       })
       const summary = result.text.trim()
       if (!summary) throw new Error('LLM returned an empty summary')
+      const displayCanonical = attempt.userModelId.toLowerCase().startsWith('openrouter/')
+        ? attempt.userModelId
+        : parsedModelEffective.canonical
       return {
         summary,
         summaryAlreadyPrinted: false,
         modelMeta: {
           provider: parsedModelEffective.provider,
-          canonical: parsedModelEffective.canonical,
+          canonical: displayCanonical,
         },
         maxOutputTokensForCall: maxOutputTokensForCall ?? null,
       }
@@ -2149,7 +2202,9 @@ export async function runCli(
       summaryAlreadyPrinted,
       modelMeta: {
         provider: parsedModelEffective.provider,
-        canonical: parsedModelEffective.canonical,
+        canonical: attempt.userModelId.toLowerCase().startsWith('openrouter/')
+          ? attempt.userModelId
+          : parsedModelEffective.canonical,
       },
       maxOutputTokensForCall: maxOutputTokensForCall ?? null,
     }
@@ -3478,7 +3533,9 @@ export async function runCli(
             report: finishReport,
             costUsd,
             detailed: metricsDetailed,
-            extraParts: metricsDetailed ? buildDetailedLengthPartsForExtracted(extracted) : null,
+            extraParts: metricsDetailed
+              ? buildDetailedLengthPartsForExtracted(extracted)
+              : buildBasicLengthPartsForExtracted(extracted),
             color: verboseColor,
           })
         }
@@ -3497,7 +3554,9 @@ export async function runCli(
           report,
           costUsd,
           detailed: metricsDetailed,
-          extraParts: metricsDetailed ? buildDetailedLengthPartsForExtracted(extracted) : null,
+          extraParts: metricsDetailed
+            ? buildDetailedLengthPartsForExtracted(extracted)
+            : buildBasicLengthPartsForExtracted(extracted),
           color: verboseColor,
         })
       }
@@ -3559,7 +3618,9 @@ export async function runCli(
             report: finishReport,
             costUsd,
             detailed: metricsDetailed,
-            extraParts: metricsDetailed ? buildDetailedLengthPartsForExtracted(extracted) : null,
+            extraParts: metricsDetailed
+              ? buildDetailedLengthPartsForExtracted(extracted)
+              : buildBasicLengthPartsForExtracted(extracted),
             color: verboseColor,
           })
         }
@@ -3578,7 +3639,9 @@ export async function runCli(
           report,
           costUsd,
           detailed: metricsDetailed,
-          extraParts: metricsDetailed ? buildDetailedLengthPartsForExtracted(extracted) : null,
+          extraParts: metricsDetailed
+            ? buildDetailedLengthPartsForExtracted(extracted)
+            : buildBasicLengthPartsForExtracted(extracted),
           color: verboseColor,
         })
       }
@@ -3845,7 +3908,9 @@ export async function runCli(
           report: finishReport,
           costUsd,
           detailed: metricsDetailed,
-          extraParts: metricsDetailed ? buildDetailedLengthPartsForExtracted(extracted) : null,
+          extraParts: metricsDetailed
+            ? buildDetailedLengthPartsForExtracted(extracted)
+            : buildBasicLengthPartsForExtracted(extracted),
           color: verboseColor,
         })
       }
@@ -3879,7 +3944,9 @@ export async function runCli(
         report,
         costUsd,
         detailed: metricsDetailed,
-        extraParts: metricsDetailed ? buildDetailedLengthPartsForExtracted(extracted) : null,
+        extraParts: metricsDetailed
+          ? buildDetailedLengthPartsForExtracted(extracted)
+          : buildBasicLengthPartsForExtracted(extracted),
         color: verboseColor,
       })
     }

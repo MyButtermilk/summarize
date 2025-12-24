@@ -23,8 +23,8 @@ vi.mock('../src/content/link-preview/transcript/index.js', () => ({
   resolveTranscriptForLink: mocks.resolveTranscriptForLink,
 }))
 
-describe('--metrics detailed', () => {
-  it('adds YouTube transcript length stats to the finish line (best effort)', async () => {
+describe('--metrics on', () => {
+  it('prints transcript length on the finish line (no noisy calls=1)', async () => {
     const youtubeUrl = 'https://www.youtube.com/watch?v=EYSQGkpuzAA&t=69s'
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.url
@@ -48,7 +48,7 @@ describe('--metrics detailed', () => {
       },
     })
 
-    await runCli(['--extract', '--metrics', 'detailed', '--timeout', '2s', youtubeUrl], {
+    await runCli(['--extract', '--metrics', 'on', '--timeout', '2s', youtubeUrl], {
       env: {},
       fetch: fetchMock as unknown as typeof fetch,
       stdout: new Writable({
@@ -59,11 +59,10 @@ describe('--metrics detailed', () => {
       stderr,
     })
 
-    expect(stderrText).toContain('calls=')
-    expect(stderrText).toMatch(/\binput=/)
-    expect(stderrText).toMatch(/\btranscript=/)
-    expect(stderrText).toMatch(/\btranscript=44s\b/)
-    expect(stderrText).toMatch(/\btranscript=.*\bwords\b/)
-    expect(stderrText).toMatch(/\btx=/)
+    expect(stderrText).toMatch(/\blen transcript=44s\b/)
+    expect(stderrText).toMatch(/\bwords\b/)
+    expect(stderrText).not.toContain('calls=')
+    expect(stderrText).not.toContain('input=')
   })
 })
+

@@ -41,6 +41,7 @@ export interface ExtractedLinkContent {
   transcriptLines: number | null
   transcriptWordCount: number | null
   transcriptSource: TranscriptSource | null
+  transcriptionProvider: string | null
   mediaDurationSeconds: number | null
   video: { kind: 'youtube' | 'direct'; url: string } | null
   isVideoOnly: boolean
