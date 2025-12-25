@@ -1393,7 +1393,7 @@ function buildCompactTranscriptPart(
 
   const mediaKind = inferMediaKindLabelForFinishLine(extracted)
 
-  return mediaKind ? `${mediaKind} ${wordLabel}, ${duration}` : `${wordLabel}, ${duration}`
+  return mediaKind ? `${duration} ${mediaKind}, ${wordLabel}` : `${duration}, ${wordLabel}`
 }
 
 export async function runCli(
