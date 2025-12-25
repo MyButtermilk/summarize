@@ -74,6 +74,8 @@ Ship is **not done** until:
      - `npm_config_auth_type=legacy pnpm publish --tag latest --access public --otp <otp>`
    - Otherwise:
      - `pnpm publish --tag latest --access public`
+   - If the CLI forces browser auth, prefer the legacy path above by sourcing `~/.profile`
+     (must include `NODE_AUTH_TOKEN`) before running the publish command.
    - Smoke:
      ```bash
      ver="$(node -p 'require(\"./package.json\").version')"
