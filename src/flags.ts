@@ -6,7 +6,6 @@ export type MarkdownMode = 'off' | 'auto' | 'llm' | 'readability'
 export type ExtractFormat = 'text' | 'markdown'
 export type PreprocessMode = 'off' | 'auto' | 'always'
 export type StreamMode = 'auto' | 'on' | 'off'
-export type RenderMode = 'auto' | 'md' | 'md-live' | 'plain'
 export type MetricsMode = 'off' | 'on' | 'detailed'
 export type VideoMode = 'auto' | 'transcript' | 'understand'
 
@@ -68,14 +67,6 @@ export function parseStreamMode(raw: string): StreamMode {
   const normalized = raw.trim().toLowerCase()
   if (normalized === 'auto' || normalized === 'on' || normalized === 'off') return normalized
   throw new Error(`Unsupported --stream: ${raw}`)
-}
-
-export function parseRenderMode(raw: string): RenderMode {
-  const normalized = raw.trim().toLowerCase()
-  if (normalized === 'auto' || normalized === 'plain') return normalized as RenderMode
-  if (normalized === 'md-live' || normalized === 'live' || normalized === 'mdlive') return 'md-live'
-  if (normalized === 'md' || normalized === 'markdown') return 'md'
-  throw new Error(`Unsupported --render: ${raw}`)
 }
 
 export function parseMetricsMode(raw: string): MetricsMode {

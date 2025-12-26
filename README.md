@@ -148,7 +148,7 @@ Use `summarize --help` or `summarize help` for the full help text.
 - `--max-output-tokens <count>`: hard cap for LLM output tokens (optional; only sent when set)
 - `--cli [provider]`: use a CLI provider (case-insensitive; equivalent to `--model cli/<provider>`). If omitted, uses auto selection with CLI enabled.
 - `--stream auto|on|off`: stream LLM output (`auto` = TTY only; disabled in `--json` mode)
-- `--render auto|md-live|md|plain`: Markdown rendering (`auto` = best default for TTY)
+- `--plain`: Keep raw output (no ANSI/OSC Markdown rendering)
 - `--no-color`: disable ANSI colors
 - `--format md|text`: website/file content format (default `text`)
 - `--markdown-mode off|auto|llm|readability`: HTML→Markdown conversion mode (default `readability`; `readability` uses Readability article HTML as input)

@@ -69,9 +69,7 @@ describe('cli markdown hyperlinks', () => {
     ;(stdout.stream as unknown as { columns?: number }).columns = 80
     const stderr = collectStream()
 
-    await runCli(
-      ['--model', 'openai/gpt-5.2', '--render', 'md', '--stream', 'off', 'https://example.com'],
-      {
+    await runCli(['--model', 'openai/gpt-5.2', '--stream', 'off', 'https://example.com'], {
         env: { HOME: root, OPENAI_API_KEY: 'test', TERM: 'xterm-256color' },
         fetch: fetchMock as unknown as typeof fetch,
         stdout: stdout.stream,

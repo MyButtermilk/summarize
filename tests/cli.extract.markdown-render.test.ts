@@ -49,7 +49,7 @@ describe('cli --extract markdown render', () => {
     return stdoutText
   }
 
-  it('renders markdown to ANSI when stdout is a TTY (default --render auto)', async () => {
+  it('renders markdown to ANSI when stdout is a TTY (default)', async () => {
     const out = await runExtract({
       args: ['--extract', '--timeout', '2s', 'https://example.com'],
       tty: true,
@@ -57,7 +57,7 @@ describe('cli --extract markdown render', () => {
     expect(out).toContain('\u001b]8;;https://example.com')
   })
 
-  it('keeps raw markdown when stdout is not a TTY (default --render auto)', async () => {
+  it('keeps raw markdown when stdout is not a TTY (default)', async () => {
     const out = await runExtract({
       args: ['--extract', '--timeout', '2s', 'https://example.com'],
       tty: false,
@@ -67,9 +67,9 @@ describe('cli --extract markdown render', () => {
     expect(out).not.toContain('\u001b]8;;https://example.com')
   })
 
-  it('keeps raw markdown when --render plain is set (even in a TTY)', async () => {
+  it('keeps raw markdown when --plain is set (even in a TTY)', async () => {
     const out = await runExtract({
-      args: ['--extract', '--render', 'plain', '--timeout', '2s', 'https://example.com'],
+      args: ['--extract', '--plain', '--timeout', '2s', 'https://example.com'],
       tty: true,
     })
     expect(out).toContain('# Title')

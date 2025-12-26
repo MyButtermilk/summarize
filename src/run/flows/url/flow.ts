@@ -49,7 +49,7 @@ export async function runUrlFlow({
       ctx.lengthArg.kind === 'preset'
         ? ctx.lengthArg.preset
         : `${ctx.lengthArg.maxCharacters} chars`
-    } maxOutputTokens=${formatOptionalNumber(ctx.maxOutputTokensArg)} retries=${ctx.retries} json=${ctx.json} extract=${ctx.extractMode} format=${ctx.format} preprocess=${ctx.preprocessMode} markdownMode=${ctx.markdownMode} model=${ctx.requestedModelLabel} videoMode=${ctx.videoMode} stream=${ctx.streamingEnabled ? 'on' : 'off'} render=${ctx.effectiveRenderMode}`,
+    } maxOutputTokens=${formatOptionalNumber(ctx.maxOutputTokensArg)} retries=${ctx.retries} json=${ctx.json} extract=${ctx.extractMode} format=${ctx.format} preprocess=${ctx.preprocessMode} markdownMode=${ctx.markdownMode} model=${ctx.requestedModelLabel} videoMode=${ctx.videoMode} stream=${ctx.streamingEnabled ? 'on' : 'off'} plain=${ctx.plain}`,
     ctx.verboseColor
   )
   writeVerbose(

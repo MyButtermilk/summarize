@@ -1,6 +1,6 @@
 import type { ModelMessage } from 'ai'
 import { countTokens } from 'gpt-tokenizer'
-import { createLiveRenderer, render as renderMarkdownAnsi } from 'markdansi'
+import { render as renderMarkdownAnsi } from 'markdansi'
 import type { CliProvider } from '../config.js'
 import { isCliDisabled, runCliModel } from '../llm/cli.js'
 import { streamTextWithModelId } from '../llm/generate-text.js'
@@ -14,7 +14,7 @@ import {
   mergeStreamingChunk,
 } from './streaming.js'
 import { resolveModelIdForLlmCall, summarizeWithModelId } from './summary-llm.js'
-import { isRichTty, markdownRenderWidth, supportsColor, terminalHeight } from './terminal.js'
+import { isRichTty, markdownRenderWidth, supportsColor } from './terminal.js'
 import type { ModelAttempt, ModelMeta } from './types.js'
 
 export type SummaryEngineDeps = {
@@ -26,7 +26,7 @@ export type SummaryEngineDeps = {
   timeoutMs: number
   retries: number
   streamingEnabled: boolean
-  effectiveRenderMode: 'md' | 'md-live' | 'plain'
+  plain: boolean
   verbose: boolean
   verboseColor: boolean
   openaiUseChatCompletions: boolean
@@ -271,12 +271,10 @@ export function createSummaryEngine(deps: SummaryEngineDeps) {
       }
     }
 
-    const shouldBufferSummaryForRender =
-      streamingEnabledForCall && deps.effectiveRenderMode === 'md' && isRichTty(deps.stdout)
-    const shouldLiveRenderSummary =
-      streamingEnabledForCall && deps.effectiveRenderMode === 'md-live' && isRichTty(deps.stdout)
-    const shouldStreamSummaryToStdout =
-      streamingEnabledForCall && !shouldBufferSummaryForRender && !shouldLiveRenderSummary
+    const shouldRenderMarkdownToAnsi = !deps.plain && isRichTty(deps.stdout)
+    const shouldStreamSummaryToStdout = streamingEnabledForCall && !shouldRenderMarkdownToAnsi
+    const shouldStreamRenderedMarkdownToStdout =
+      streamingEnabledForCall && shouldRenderMarkdownToAnsi
 
     let summaryAlreadyPrinted = false
     let summary = ''
@@ -369,78 +367,98 @@ export function createSummaryEngine(deps: SummaryEngineDeps) {
       }
     }
 
-    if (streamResult) {
-      getLastStreamError = streamResult.lastError
-      let streamed = ''
-      let liveOverflowed = false
-      let liveFinalFrame: string | null = null
-      const terminalRows = terminalHeight(deps.stdout, deps.env)
-      const maxLiveRows = Math.max(3, terminalRows - 1)
-      const tailLiveRows = Math.max(1, Math.min(maxLiveRows - 1, 12))
-      const liveWidth = markdownRenderWidth(deps.stdout, deps.env)
-      const liveRenderer = shouldLiveRenderSummary
-        ? createLiveRenderer({
-            write: (chunk) => {
-              deps.clearProgressForStdout()
-              deps.stdout.write(chunk)
-            },
-            width: liveWidth,
-            renderFrame: (markdown) =>
-              renderMarkdownAnsi(prepareMarkdownForTerminal(markdown), {
-                width: liveWidth,
-                wrap: true,
-                color: supportsColor(deps.stdout, deps.envForRun),
-                hyperlinks: true,
-              }),
-            // markdansi supports tailRows/maxRows at runtime; typings lag behind.
-            appendWhenPossible: true,
-            tailRows: tailLiveRows,
-            maxRows: maxLiveRows,
-            clearOnOverflow: false,
-            clearScrollbackOnOverflow: false,
-            onOverflow: () => {
-              liveOverflowed = true
-            },
-          } as Parameters<typeof createLiveRenderer>[0])
-        : null
-      let lastFrameAtMs = 0
-      try {
-        let cleared = false
-        for await (const delta of streamResult.textStream) {
-          const merged = mergeStreamingChunk(streamed, delta)
-          streamed = merged.next
-          if (shouldStreamSummaryToStdout) {
-            if (!cleared) {
-              deps.clearProgressForStdout()
-              cleared = true
-            }
-            if (merged.appended) deps.stdout.write(merged.appended)
-            continue
-          }
+	    if (streamResult) {
+	      getLastStreamError = streamResult.lastError
+	      let streamed = ''
+	      let plainFlushedLen = 0
+	      let streamedRaw = ''
+	      const liveWidth = markdownRenderWidth(deps.stdout, deps.env)
 
-          if (liveRenderer && !liveOverflowed) {
-            const now = Date.now()
-            const due = now - lastFrameAtMs >= 120
-            const hasNewline = delta.includes('\n')
-            if (hasNewline || due) {
-              liveRenderer.render(streamed)
-              lastFrameAtMs = now
-            }
+      let previousRendered = ''
+      let pendingAnsi = ''
+      let reflowCount = 0
+
+      const renderFrame = (markdown: string): string =>
+        renderMarkdownAnsi(prepareMarkdownForTerminal(markdown), {
+          width: liveWidth,
+          wrap: true,
+          color: supportsColor(deps.stdout, deps.envForRun),
+          hyperlinks: true,
+        })
+
+      const flushCompleteLines = () => {
+        const idx = pendingAnsi.lastIndexOf('\n')
+        if (idx < 0) return
+        const upto = idx + 1
+        const chunk = pendingAnsi.slice(0, upto)
+        pendingAnsi = pendingAnsi.slice(upto)
+        if (!chunk) return
+        deps.clearProgressForStdout()
+        deps.stdout.write(chunk)
+      }
+
+      const updateRenderedStream = (markdown: string, { final }: { final: boolean }) => {
+        const raw = renderFrame(markdown)
+        const rendered = final && !raw.endsWith('\n') ? `${raw}\n` : raw
+        if (previousRendered && !rendered.startsWith(previousRendered)) {
+          reflowCount += 1
+          if (reflowCount === 1) {
+            // Rare: renderer changed earlier output (tables, etc). Keep scrollback-only semantics:
+            // append a full frame (may duplicate), then continue with prefix matching from there.
+            pendingAnsi = ''
+            previousRendered = ''
+            pendingAnsi += rendered
+            flushCompleteLines()
+            previousRendered = rendered
+            return
           }
+          // Too many reflows; stop emitting incremental ANSI to avoid massive duplication.
+          previousRendered = rendered
+          return
         }
 
-        const trimmed = streamed.trim()
-        streamed = trimmed
-        if (liveRenderer && !liveOverflowed) {
-          if (tailLiveRows > 0) {
-            liveFinalFrame = trimmed
-          } else {
-            liveRenderer.render(trimmed)
+        const appended = previousRendered ? rendered.slice(previousRendered.length) : rendered
+        previousRendered = rendered
+        if (!appended) return
+        pendingAnsi += appended
+        flushCompleteLines()
+      }
+
+	      try {
+	        let cleared = false
+	        for await (const delta of streamResult.textStream) {
+	          const merged = mergeStreamingChunk(streamed, delta)
+	          streamed = merged.next
+	          if (shouldStreamSummaryToStdout) {
+	            const lastNl = streamed.lastIndexOf('\n')
+	            if (lastNl >= 0 && lastNl + 1 > plainFlushedLen) {
+	              if (!cleared) {
+	                deps.clearProgressForStdout()
+	                cleared = true
+	              }
+	              deps.stdout.write(streamed.slice(plainFlushedLen, lastNl + 1))
+	              plainFlushedLen = lastNl + 1
+	            }
+	            continue
+	          }
+
+          if (shouldStreamRenderedMarkdownToStdout) {
+            const hasNewline = delta.includes('\n')
+            if (hasNewline) {
+              updateRenderedStream(streamed, { final: false })
+            }
           }
+	        }
+
+	        streamedRaw = streamed
+	        const trimmed = streamed.trim()
+	        streamed = trimmed
+	      } finally {
+	        if (shouldStreamRenderedMarkdownToStdout) {
+	          updateRenderedStream(streamed, { final: true })
+	          flushCompleteLines()
           summaryAlreadyPrinted = true
         }
-      } finally {
-        liveRenderer?.finish(liveFinalFrame ?? undefined)
       }
       const usage = await streamResult.usage
       deps.llmCalls.push({
@@ -448,15 +466,20 @@ export function createSummaryEngine(deps: SummaryEngineDeps) {
         model: streamResult.canonicalModelId,
         usage,
         purpose: 'summary',
-      })
-      summary = streamed
-      if (shouldStreamSummaryToStdout) {
-        if (!streamed.endsWith('\n')) {
-          deps.stdout.write('\n')
-        }
-        summaryAlreadyPrinted = true
-      }
-    }
+	      })
+	      summary = streamed
+	      if (shouldStreamSummaryToStdout) {
+	        const finalText = streamedRaw || streamed
+	        const remaining =
+	          plainFlushedLen < finalText.length ? finalText.slice(plainFlushedLen) : ''
+	        if (remaining) deps.stdout.write(remaining)
+	        const endedWithNewline = remaining
+	          ? remaining.endsWith('\n')
+	          : plainFlushedLen > 0 && finalText[plainFlushedLen - 1] === '\n'
+	        if (!endedWithNewline) deps.stdout.write('\n')
+	        summaryAlreadyPrinted = true
+	      }
+	    }
 
     summary = summary.trim()
     if (summary.length === 0) {

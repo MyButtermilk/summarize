@@ -64,7 +64,7 @@ function writeLiteLlmCache(root: string) {
 
 async function runStreamedSummary(
   chunks: string[],
-  options?: { render?: 'plain' | 'md' | 'md-live'; stdoutIsTty?: boolean }
+  options?: { stdoutIsTty?: boolean }
 ): Promise<string> {
   streamTextMock.mockImplementationOnce(() => ({
     textStream: createTextStream(chunks),
@@ -109,8 +109,7 @@ async function runStreamedSummary(
         '2s',
         '--stream',
         'on',
-        '--render',
-        options?.render ?? 'plain',
+        '--plain',
         'https://example.com',
       ],
       {
@@ -153,36 +152,24 @@ describe('cli stream chunk merge', () => {
   })
 
   it('treats near-prefix cumulative chunks as replacements', async () => {
-    const out = await runStreamedSummary(['Hello world.', 'Hello world!'], {
-      render: 'md',
-      stdoutIsTty: true,
-    })
+    const out = await runStreamedSummary(['Hello world.', 'Hello world!'])
     expect(out).toBe('Hello world!\n')
   })
 
   it('ignores regressions where a later chunk is a shorter prefix', async () => {
-    const out = await runStreamedSummary(['Hello world', 'Hello'], {
-      render: 'md',
-      stdoutIsTty: true,
-    })
+    const out = await runStreamedSummary(['Hello world', 'Hello'])
     expect(out).toBe('Hello world\n')
   })
 
   it('merges overlapping suffix/prefix chunks without duplication', async () => {
-    const out = await runStreamedSummary(['Hello world', 'world!'], {
-      render: 'md',
-      stdoutIsTty: true,
-    })
+    const out = await runStreamedSummary(['Hello world', 'world!'])
     expect(out).toBe('Hello world!\n')
   })
 
   it('treats near-prefix edits as replacements (prefix threshold)', async () => {
     const prev = 'abcdefghijklmnopqrst'
     const next = 'abcdefghijklmnopqrsu'
-    const out = await runStreamedSummary([prev, next], {
-      render: 'md',
-      stdoutIsTty: true,
-    })
+    const out = await runStreamedSummary([prev, next])
     expect(out).toBe(`${next}\n`)
   })
 })

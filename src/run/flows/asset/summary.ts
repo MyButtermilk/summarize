@@ -57,12 +57,12 @@ export type AssetSummaryContext = {
   metricsDetailed: boolean
   shouldComputeReport: boolean
   runStartedAtMs: number
-  verbose: boolean
-  verboseColor: boolean
-  streamingEnabled: boolean
-  effectiveRenderMode: 'md' | 'md-live' | 'plain'
-  summaryEngine: ReturnType<typeof createSummaryEngine>
-  trackedFetch: typeof fetch
+	  verbose: boolean
+	  verboseColor: boolean
+	  streamingEnabled: boolean
+	  plain: boolean
+	  summaryEngine: ReturnType<typeof createSummaryEngine>
+	  trackedFetch: typeof fetch
   writeViaFooter: (parts: string[]) => void
   clearProgressForStdout: () => void
   getLiteLlmCatalog: () => Promise<
@@ -403,8 +403,7 @@ export async function summarizeAsset(ctx: AssetSummaryContext, args: SummarizeAs
   if (!summaryAlreadyPrinted) {
     ctx.clearProgressForStdout()
     const rendered =
-      (ctx.effectiveRenderMode === 'md' || ctx.effectiveRenderMode === 'md-live') &&
-      isRichTty(ctx.stdout)
+      !ctx.plain && isRichTty(ctx.stdout)
         ? renderMarkdownAnsi(prepareMarkdownForTerminal(summary), {
             width: markdownRenderWidth(ctx.stdout, ctx.env),
             wrap: true,

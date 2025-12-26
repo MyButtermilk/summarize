@@ -161,15 +161,15 @@ export async function outputExtractedUrl({
     return
   }
 
-  const renderedExtract =
-    ctx.format === 'markdown' &&
-    (ctx.effectiveRenderMode === 'md' || ctx.effectiveRenderMode === 'md-live') &&
-    isRichTty(ctx.stdout)
-      ? renderMarkdownAnsi(prepareMarkdownForTerminal(extracted.content), {
-          width: markdownRenderWidth(ctx.stdout, ctx.env),
-          wrap: true,
-          color: supportsColor(ctx.stdout, ctx.envForRun),
-          hyperlinks: true,
+	  const renderedExtract =
+	    ctx.format === 'markdown' &&
+	    !ctx.plain &&
+	    isRichTty(ctx.stdout)
+	      ? renderMarkdownAnsi(prepareMarkdownForTerminal(extracted.content), {
+	          width: markdownRenderWidth(ctx.stdout, ctx.env),
+	          wrap: true,
+	          color: supportsColor(ctx.stdout, ctx.envForRun),
+	          hyperlinks: true,
         })
       : extracted.content
 
@@ -492,8 +492,7 @@ export async function summarizeExtractedUrl({
   if (!summaryAlreadyPrinted) {
     ctx.clearProgressForStdout()
     const rendered =
-      (ctx.effectiveRenderMode === 'md' || ctx.effectiveRenderMode === 'md-live') &&
-      isRichTty(ctx.stdout)
+      !ctx.plain && isRichTty(ctx.stdout)
         ? renderMarkdownAnsi(prepareMarkdownForTerminal(summary), {
             width: markdownRenderWidth(ctx.stdout, ctx.env),
             wrap: true,

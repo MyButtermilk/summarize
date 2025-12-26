@@ -98,8 +98,7 @@ describe('cli streaming with auto model selection', () => {
         '2s',
         '--stream',
         'on',
-        '--render',
-        'plain',
+        '--plain',
         'https://example.com',
       ],
       {

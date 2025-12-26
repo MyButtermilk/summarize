@@ -95,8 +95,7 @@ describe('cli asset inputs (local file)', () => {
         '2s',
         '--stream',
         'on',
-        '--render',
-        'plain',
+        '--plain',
         pdfPath,
       ],
       {
@@ -162,8 +161,7 @@ describe('cli asset inputs (local file)', () => {
         '2s',
         '--stream',
         'on',
-        '--render',
-        'plain',
+        '--plain',
         txtPath,
       ],
       {
@@ -228,8 +226,7 @@ describe('cli asset inputs (local file)', () => {
         '2s',
         '--stream',
         'on',
-        '--render',
-        'plain',
+        '--plain',
         txtPath,
       ],
       {
@@ -288,19 +285,18 @@ describe('cli asset inputs (local file)', () => {
     const stderr = collectStream()
 
     await expect(
-      runCli(
-        [
-          '--model',
-          'openai/gpt-5.2',
-          '--timeout',
-          '2s',
-          '--stream',
-          'on',
-          '--render',
-          'plain',
-          txtPath,
-        ],
-        {
+	      runCli(
+	        [
+	          '--model',
+	          'openai/gpt-5.2',
+	          '--timeout',
+	          '2s',
+	          '--stream',
+	          'on',
+	          '--plain',
+	          txtPath,
+	        ],
+	        {
           env: { HOME: root, OPENAI_API_KEY: 'test' },
           fetch: vi.fn(async () => {
             throw new Error('unexpected fetch')
@@ -343,19 +339,18 @@ describe('cli asset inputs (local file)', () => {
     writeFileSync(txtPath, Buffer.alloc(10 * 1024 * 1024 + 1, 'a'))
 
     const run = () =>
-      runCli(
-        [
-          '--model',
-          'openai/gpt-5.2',
-          '--timeout',
-          '2s',
-          '--stream',
-          'on',
-          '--render',
-          'plain',
-          txtPath,
-        ],
-        {
+	      runCli(
+	        [
+	          '--model',
+	          'openai/gpt-5.2',
+	          '--timeout',
+	          '2s',
+	          '--stream',
+	          'on',
+	          '--plain',
+	          txtPath,
+	        ],
+	        {
           env: { HOME: root, OPENAI_API_KEY: 'test' },
           fetch: vi.fn(async () => {
             throw new Error('unexpected fetch')

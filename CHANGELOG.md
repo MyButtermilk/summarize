@@ -4,16 +4,15 @@
 
 ### Fixed
 
-- Streaming: pad live max-rows and use tail redraw to avoid scrollback duplication while streaming Markdown.
-- Streaming: lock live render width and tighten tail rows to reduce duplicate lines while scrolling.
-- Streaming: re-render full summary on completion so tail mode doesn’t truncate output.
-- Streaming: append when frames are prefix-only so scrollback grows during stable streaming.
+- Streaming: render streamed Markdown append-only (newline-bounded) to avoid line loss from in-place redraw.
+- Streaming: flush newline-bounded output in `--plain` mode to avoid duplication with cumulative stream chunks.
 - Website extraction: strip inline CSS before Readability to avoid extremely slow jsdom stylesheet parsing on some pages.
 - Twitter/X: rotate Nitter hosts and skip Anubis PoW pages during tweet fallback.
 
 ### Changed
 
-- Dev: pin `markdansi` to the local repo to pick up tail redraw support.
+- CLI: remove `--render`; add `--plain` to keep raw text/Markdown output (no ANSI/OSC rendering).
+- Output: Markdown rendering is automatic on TTY unless `--plain` is set.
 
 ## 0.6.1 - 2025-12-25
 

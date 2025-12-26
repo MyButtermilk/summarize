@@ -33,7 +33,7 @@ function createTextStream(chunks: string[]): AsyncIterable<string> {
 
 const streamTextMock = vi.fn(() => {
   return {
-    textStream: createTextStream(['Hello **bo', 'ld**\n']),
+    textStream: createTextStream(['[A](https://example.com)\n']),
     totalUsage: Promise.resolve({
       promptTokens: 100,
       completionTokens: 50,
@@ -54,8 +54,8 @@ vi.mock('@ai-sdk/openai', () => ({
   createOpenAI: createOpenAIMock,
 }))
 
-describe('cli md-live rendering', () => {
-  it('uses synchronized output for live markdown when --render auto on a TTY', async () => {
+describe('cli streamed markdown rendering', () => {
+  it('streams rendered markdown (append-only) when stdout is a TTY', async () => {
     const root = mkdtempSync(join(tmpdir(), 'summarize-md-live-'))
     const cacheDir = join(root, '.summarize', 'cache')
     mkdirSync(cacheDir, { recursive: true })
@@ -100,12 +100,10 @@ describe('cli md-live rendering', () => {
         '2s',
         '--stream',
         'auto',
-        '--render',
-        'auto',
         'https://example.com',
       ],
       {
-        env: { HOME: root, OPENAI_API_KEY: 'test' },
+        env: { HOME: root, OPENAI_API_KEY: 'test', TERM: 'xterm-256color' },
         fetch: fetchMock as unknown as typeof fetch,
         stdout: stdout.stream,
         stderr: stderr.stream,
@@ -113,16 +111,12 @@ describe('cli md-live rendering', () => {
     )
 
     const out = stdout.getText()
-    expect(out).toContain('\u001b[?2026h')
-    expect(out).toContain('\u001b[?2026l')
-    expect(out).toContain('\u001b[0J')
-    expect(out).toContain('\u001b[?25l')
-    expect(out).toContain('\u001b[?25h')
-
-    const ESC = String.fromCharCode(27)
-    const bsuCount = out.split(`${ESC}[?2026h`).length - 1
-    expect(bsuCount).toBeGreaterThanOrEqual(2)
-    expect(out).toMatch(new RegExp(`${ESC}\\[[0-9]+A\\r`))
+    expect(out).toContain('https://example.com')
+    expect(out).not.toContain('\u001b[?2026h')
+    expect(out).not.toContain('\u001b[?2026l')
+    expect(out).not.toContain('\u001b[0J')
+    expect(out).not.toContain('\u001b[?25l')
+    expect(out).not.toContain('\u001b[?25h')
 
     globalFetchSpy.mockRestore()
   })

@@ -9,7 +9,6 @@ import {
   parseMaxOutputTokensArg,
   parseMetricsMode,
   parsePreprocessMode,
-  parseRenderMode,
   parseRetriesArg,
   parseStreamMode,
   parseYoutubeMode,
@@ -130,7 +129,7 @@ export async function runCli(
   const extractMode = Boolean(program.opts().extract) || Boolean(program.opts().extractOnly)
   const json = Boolean(program.opts().json)
   const streamMode = parseStreamMode(program.opts().stream as string)
-  const renderMode = parseRenderMode(program.opts().render as string)
+  const plain = Boolean(program.opts().plain)
   const debug = Boolean(program.opts().debug)
   const verbose = Boolean(program.opts().verbose) || debug
 
@@ -273,9 +272,8 @@ export async function runCli(
   })
 
   const verboseColor = supportsColor(stderr, envForRun)
-  const { streamingEnabled, effectiveRenderMode } = resolveStreamSettings({
+  const { streamingEnabled } = resolveStreamSettings({
     streamMode,
-    renderMode,
     stdout,
     json,
     extractMode,
@@ -304,7 +302,7 @@ export async function runCli(
     timeoutMs,
     retries,
     streamingEnabled,
-    effectiveRenderMode,
+    plain,
     verbose,
     verboseColor,
     openaiUseChatCompletions,
@@ -370,11 +368,11 @@ export async function runCli(
     shouldComputeReport,
     runStartedAtMs,
     verbose,
-    verboseColor,
-    streamingEnabled,
-    effectiveRenderMode,
-    summaryEngine,
-    trackedFetch,
+	    verboseColor,
+	    streamingEnabled,
+	    plain,
+	    summaryEngine,
+	    trackedFetch,
     writeViaFooter,
     clearProgressForStdout,
     getLiteLlmCatalog,
@@ -455,11 +453,11 @@ export async function runCli(
     runStartedAtMs,
     verbose,
     verboseColor,
-    progressEnabled,
-    streamingEnabled,
-    effectiveRenderMode,
-    openaiUseChatCompletions,
-    configPath,
+	    progressEnabled,
+	    streamingEnabled,
+	    plain,
+	    openaiUseChatCompletions,
+	    configPath,
     configModelLabel,
     openaiWhisperUsdPerMinute,
     setTranscriptionCost,

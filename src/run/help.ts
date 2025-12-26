@@ -90,11 +90,7 @@ export function buildProgram() {
       'Stream LLM output: auto (TTY only), on, off. Note: streaming is disabled in --json mode.',
       'auto'
     )
-    .option(
-      '--render <mode>',
-      'Render Markdown output: auto (TTY only), md-live, md, plain. Note: auto selects md-live when streaming to a TTY.',
-      'auto'
-    )
+    .option('--plain', 'Keep raw text/markdown output (no ANSI/OSC rendering)', false)
     .option('--no-color', 'Disable ANSI colors in output', false)
     .option('--verbose', 'Print detailed progress info to stderr', false)
     .option('--debug', 'Alias for --verbose (and defaults --metrics to detailed)', false)

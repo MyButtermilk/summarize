@@ -94,8 +94,7 @@ describe('cli auto fallback behavior', () => {
         '2s',
         '--max-output-tokens',
         '50',
-        '--render',
-        'plain',
+        '--plain',
         'https://example.com',
       ],
       {
@@ -155,8 +154,7 @@ describe('cli auto fallback behavior', () => {
         '2s',
         '--max-output-tokens',
         '50',
-        '--render',
-        'plain',
+        '--plain',
         'https://example.com',
       ],
       {
