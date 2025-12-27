@@ -96,21 +96,29 @@ async function resolveCliEntrypointPathForLaunchd(): Promise<string> {
   if (!argv1) throw new Error('Unable to resolve CLI entrypoint path')
 
   const normalized = path.resolve(argv1)
-  const looksLikeDist = /[/\\]dist[/\\].+\.cjs$/.test(normalized)
+  const looksLikeDist = /[/\\]dist[/\\].+\.(cjs|js)$/.test(normalized)
   if (looksLikeDist) {
     await fs.access(normalized)
     return normalized
   }
 
-  const distCandidate = path.resolve(path.dirname(normalized), '../dist/cli.cjs')
-  try {
-    await fs.access(distCandidate)
-    return distCandidate
-  } catch {
-    throw new Error(
-      `Cannot find built CLI at ${distCandidate}. Run "pnpm build:cli" (or "pnpm build") first, or pass --dev to install a dev LaunchAgent.`
-    )
+  const distCandidates = [
+    path.resolve(path.dirname(normalized), '../dist/cli.cjs'),
+    path.resolve(path.dirname(normalized), '../dist/cli.js'),
+  ]
+
+  for (const candidate of distCandidates) {
+    try {
+      await fs.access(candidate)
+      return candidate
+    } catch {
+      // keep going
+    }
   }
+
+  throw new Error(
+    `Cannot find built CLI at ${distCandidates.join(' or ')}. Run "pnpm build:cli" (or "pnpm build") first, or pass --dev to install a dev LaunchAgent.`
+  )
 }
 
 function resolveRepoRootForDev(): string {
