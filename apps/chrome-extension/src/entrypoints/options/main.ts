@@ -1,4 +1,5 @@
 import { defaultSettings, loadSettings, saveSettings } from '../../lib/settings'
+import { readPresetOrCustomValue, resolvePresetOrCustom } from '../../lib/combo'
 
 function byId<T extends HTMLElement>(id: string): T {
   const el = document.getElementById(id)
@@ -11,8 +12,10 @@ const statusEl = byId<HTMLSpanElement>('status')
 
 const tokenEl = byId<HTMLInputElement>('token')
 const modelEl = byId<HTMLInputElement>('model')
-const lengthEl = byId<HTMLInputElement>('length')
-const languageEl = byId<HTMLInputElement>('language')
+const lengthPresetEl = byId<HTMLSelectElement>('lengthPreset')
+const lengthCustomEl = byId<HTMLInputElement>('lengthCustom')
+const languagePresetEl = byId<HTMLSelectElement>('languagePreset')
+const languageCustomEl = byId<HTMLInputElement>('languageCustom')
 const promptOverrideEl = byId<HTMLTextAreaElement>('promptOverride')
 const autoEl = byId<HTMLInputElement>('auto')
 const maxCharsEl = byId<HTMLInputElement>('maxChars')
@@ -23,18 +26,40 @@ const setStatus = (text: string) => {
   statusEl.textContent = text
 }
 
+const lengthPresets = ['short', 'medium', 'long', 'xl', 'xxl', '20k']
+const languagePresets = ['auto', 'en', 'de', 'es', 'fr', 'it', 'pt', 'ja', 'zh', 'ko']
+
 async function load() {
   const s = await loadSettings()
   tokenEl.value = s.token
   modelEl.value = s.model
-  lengthEl.value = s.length
-  languageEl.value = s.language
+  {
+    const resolved = resolvePresetOrCustom({ value: s.length, presets: lengthPresets })
+    lengthPresetEl.value = resolved.presetValue
+    lengthCustomEl.hidden = !resolved.isCustom
+    lengthCustomEl.value = resolved.customValue
+  }
+  {
+    const resolved = resolvePresetOrCustom({ value: s.language, presets: languagePresets })
+    languagePresetEl.value = resolved.presetValue
+    languageCustomEl.hidden = !resolved.isCustom
+    languageCustomEl.value = resolved.customValue
+  }
   promptOverrideEl.value = s.promptOverride
   autoEl.checked = s.autoSummarize
   maxCharsEl.value = String(s.maxChars)
   fontFamilyEl.value = s.fontFamily
   fontSizeEl.value = String(s.fontSize)
 }
+
+lengthPresetEl.addEventListener('change', () => {
+  lengthCustomEl.hidden = lengthPresetEl.value !== 'custom'
+  if (!lengthCustomEl.hidden) lengthCustomEl.focus()
+})
+languagePresetEl.addEventListener('change', () => {
+  languageCustomEl.hidden = languagePresetEl.value !== 'custom'
+  if (!languageCustomEl.hidden) languageCustomEl.focus()
+})
 
 formEl.addEventListener('submit', (e) => {
   e.preventDefault()
@@ -43,8 +68,16 @@ formEl.addEventListener('submit', (e) => {
     await saveSettings({
       token: tokenEl.value || defaultSettings.token,
       model: modelEl.value || defaultSettings.model,
-      length: lengthEl.value || defaultSettings.length,
-      language: languageEl.value || defaultSettings.language,
+      length: readPresetOrCustomValue({
+        presetValue: lengthPresetEl.value,
+        customValue: lengthCustomEl.value,
+        defaultValue: defaultSettings.length,
+      }),
+      language: readPresetOrCustomValue({
+        presetValue: languagePresetEl.value,
+        customValue: languageCustomEl.value,
+        defaultValue: defaultSettings.language,
+      }),
       promptOverride: promptOverrideEl.value || defaultSettings.promptOverride,
       autoSummarize: autoEl.checked,
       maxChars: Number(maxCharsEl.value) || defaultSettings.maxChars,

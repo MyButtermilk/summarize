@@ -35,47 +35,53 @@
         </label>
         <label>
           <span>Length</span>
-          <input
-            id="length"
-            type="text"
-            list="lengthPresets"
-            placeholder="xl / short / 20k"
-            autocapitalize="off"
-            autocomplete="off"
-            spellcheck="false"
-          />
-          <datalist id="lengthPresets">
-            <option value="short"></option>
-            <option value="medium"></option>
-            <option value="long"></option>
-            <option value="xl"></option>
-            <option value="xxl"></option>
-            <option value="20k"></option>
-          </datalist>
+          <div class="combo">
+            <select id="lengthPreset">
+              <option value="short">short</option>
+              <option value="medium">medium</option>
+              <option value="long">long</option>
+              <option value="xl">xl</option>
+              <option value="xxl">xxl</option>
+              <option value="20k">20k</option>
+              <option value="custom">Custom…</option>
+            </select>
+            <input
+              id="lengthCustom"
+              type="text"
+              placeholder="Custom (e.g. 20k)"
+              autocapitalize="off"
+              autocomplete="off"
+              spellcheck="false"
+              hidden
+            />
+          </div>
         </label>
         <label>
           <span>Language</span>
-          <input
-            id="language"
-            type="text"
-            list="languagePresets"
-            placeholder="auto / en / de / …"
-            autocapitalize="off"
-            autocomplete="off"
-            spellcheck="false"
-          />
-          <datalist id="languagePresets">
-            <option value="auto"></option>
-            <option value="en"></option>
-            <option value="de"></option>
-            <option value="es"></option>
-            <option value="fr"></option>
-            <option value="it"></option>
-            <option value="pt"></option>
-            <option value="ja"></option>
-            <option value="zh"></option>
-            <option value="ko"></option>
-          </datalist>
+          <div class="combo">
+            <select id="languagePreset">
+              <option value="auto">auto</option>
+              <option value="en">en</option>
+              <option value="de">de</option>
+              <option value="es">es</option>
+              <option value="fr">fr</option>
+              <option value="it">it</option>
+              <option value="pt">pt</option>
+              <option value="ja">ja</option>
+              <option value="zh">zh</option>
+              <option value="ko">ko</option>
+              <option value="custom">Custom…</option>
+            </select>
+            <input
+              id="languageCustom"
+              type="text"
+              placeholder="Custom (e.g. German / en-US)"
+              autocapitalize="off"
+              autocomplete="off"
+              spellcheck="false"
+              hidden
+            />
+          </div>
         </label>
         <label>
           <span>Prompt override</span>

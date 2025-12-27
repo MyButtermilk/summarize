@@ -99,7 +99,8 @@ label > span {
 
 input[type="text"],
 input[type="number"],
-textarea {
+textarea,
+select {
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--text);
@@ -110,14 +111,33 @@ textarea {
   font-size: 12px;
 }
 
+select {
+  appearance: none;
+  padding-right: 34px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: calc(100% - 16px) calc(50% - 2px), calc(100% - 11px) calc(50% - 2px);
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+}
+
 input:focus,
 textarea:focus {
+  border-color: rgba(122, 228, 243, 0.45);
+}
+
+select:focus {
   border-color: rgba(122, 228, 243, 0.45);
 }
 
 textarea {
   min-height: 120px;
   resize: vertical;
+}
+
+.combo {
+  display: grid;
+  gap: 8px;
 }
 
 .row {
