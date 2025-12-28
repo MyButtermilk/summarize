@@ -98,11 +98,6 @@ export const fetchTranscript = async (
 
   // Try no-auto mode (skip auto-generated captions, fall back to yt-dlp)
   if (mode === 'no-auto') {
-    if (!canRunYtDlp) {
-      throw new Error(
-        '--youtube no-auto requires yt-dlp and a transcription provider (whisper-cpp, OPENAI_API_KEY, or FAL_KEY) for fallback'
-      )
-    }
     pushHint('YouTube: checking creator captions only (skipping auto-generated)')
     attemptedProviders.push('captionTracks')
     const manualTranscript = await fetchTranscriptFromCaptionTracks(options.fetch, {
@@ -166,6 +161,11 @@ export const fetchTranscript = async (
 
   // Try yt-dlp (audio download + OpenAI/FAL transcription) if mode is 'auto', 'no-auto', or 'yt-dlp'
   if (mode === 'yt-dlp' || mode === 'no-auto' || (mode === 'auto' && canRunYtDlp)) {
+    if (mode === 'no-auto' && !canRunYtDlp) {
+      throw new Error(
+        '--youtube no-auto requires yt-dlp and a transcription provider (whisper-cpp, OPENAI_API_KEY, or FAL_KEY) for fallback'
+      )
+    }
     if (mode === 'auto') {
       pushHint('YouTube: captions unavailable; falling back to yt-dlp audio')
     } else if (mode === 'no-auto') {
