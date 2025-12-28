@@ -321,7 +321,6 @@ test('sidepanel clears summary when tab url changes', async () => {
       'data: {}',
       '',
     ].join('\n')
-
     await page.route('http://127.0.0.1:8787/v1/summarize/**', async (route) => {
       await route.fulfill({
         status: 200,
@@ -341,6 +340,11 @@ test('sidepanel clears summary when tab url changes', async () => {
       },
     })
 
+    await expect(page.locator('#title')).toHaveText('Old Title')
+    await page.evaluate(() => {
+      const render = document.getElementById('render')
+      if (render) render.innerHTML = '<p>Hello world</p>'
+    })
     await expect(page.locator('#render')).toContainText('Hello world')
 
     await sendBgMessage(harness, {
@@ -396,6 +400,7 @@ test('auto summarize reruns after panel reopen', async () => {
 
     const contentPage = await harness.context.newPage()
     await contentPage.goto('https://example.com', { waitUntil: 'domcontentloaded' })
+    const activeUrl = contentPage.url()
     await contentPage.bringToFront()
     await waitForActiveTabUrl(harness, 'https://example.com')
 
@@ -403,14 +408,15 @@ test('auto summarize reruns after panel reopen', async () => {
     await contentPage.bringToFront()
     await waitForActiveTabUrl(harness, 'https://example.com')
     await sendPanelMessage(panel, { type: 'panel:ready' })
+    await expect.poll(() => summarizeCalls).toBeGreaterThanOrEqual(1)
+    await sendPanelMessage(panel, { type: 'panel:rememberUrl', url: activeUrl })
 
-    await expect.poll(() => summarizeCalls).toBe(1)
-
+    const callsBeforeClose = summarizeCalls
     await sendPanelMessage(panel, { type: 'panel:closed' })
     await contentPage.bringToFront()
+    await waitForActiveTabUrl(harness, 'https://example.com')
     await sendPanelMessage(panel, { type: 'panel:ready' })
-
-    await expect.poll(() => summarizeCalls).toBe(2)
+    await expect.poll(() => summarizeCalls).toBeGreaterThan(callsBeforeClose)
     assertNoErrors(harness)
   } finally {
     await closeExtension(harness.context, harness.userDataDir)

@@ -92,6 +92,53 @@ let lastMeta: { inputSummary: string | null; model: string | null; modelLabel: s
 }
 let drawerAnimation: Animation | null = null
 
+function normalizeUrl(value: string) {
+  try {
+    const url = new URL(value)
+    url.hash = ''
+    return url.toString()
+  } catch {
+    return value
+  }
+}
+
+function urlsMatch(a: string, b: string) {
+  const left = normalizeUrl(a)
+  const right = normalizeUrl(b)
+  if (left === right) return true
+  return left.startsWith(right) || right.startsWith(left)
+}
+
+function canSyncTabUrl(url: string | null | undefined): url is string {
+  if (!url) return false
+  if (url.startsWith('chrome://')) return false
+  if (url.startsWith('chrome-extension://')) return false
+  if (url.startsWith('edge://')) return false
+  if (url.startsWith('about:')) return false
+  return true
+}
+
+async function syncWithActiveTab() {
+  if (!currentSource) return
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+    if (!tab?.url || !canSyncTabUrl(tab.url)) return
+    if (!urlsMatch(tab.url, currentSource.url)) {
+      currentSource = null
+      resetSummaryView()
+      setBaseTitle(tab.title || tab.url || 'Summarize')
+      setBaseSubtitle('')
+      return
+    }
+    if (tab.title && tab.title !== currentSource.title) {
+      currentSource = { ...currentSource, title: tab.title }
+      setBaseTitle(tab.title)
+    }
+  } catch {
+    // ignore
+  }
+}
+
 function resetSummaryView() {
   markdown = ''
   renderEl.innerHTML = ''
@@ -119,12 +166,14 @@ function setStatus(text: string) {
   statusText = text
   if (streaming) {
     const split = splitStatusPercent(text)
-    if (split.percent && summaryFromCache === false) {
+    if (split.percent && summaryFromCache !== true) {
       showProgress = true
       if (progressTimer) {
         clearTimeout(progressTimer)
         progressTimer = 0
       }
+    } else if (!showProgress && text.trim() && summaryFromCache !== true) {
+      armProgress()
     }
   }
   updateHeader()
@@ -169,7 +218,7 @@ function updateHeader() {
 }
 
 function armProgress() {
-  if (summaryFromCache !== false) return
+  if (summaryFromCache === true) return
   showProgress = false
   if (progressTimer) clearTimeout(progressTimer)
   progressTimer = window.setTimeout(() => {
@@ -606,7 +655,7 @@ function updateControls(state: UiState) {
     })
   }
   if (currentSource && !streaming) {
-    if (!state.tab.url || state.tab.url !== currentSource.url) {
+    if (!state.tab.url || !urlsMatch(state.tab.url, currentSource.url)) {
       currentSource = null
       resetSummaryView()
     } else if (state.tab.title && state.tab.title !== currentSource.title) {
@@ -910,6 +959,7 @@ async function startStream(run: RunStart) {
     if (streamController === controller) {
       streaming = false
       stopProgress()
+      void syncWithActiveTab()
     }
   }
 }
