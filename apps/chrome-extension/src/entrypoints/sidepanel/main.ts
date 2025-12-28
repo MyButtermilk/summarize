@@ -10,7 +10,7 @@ import { mountSidepanelLengthPicker, mountSidepanelPickers } from './pickers'
 
 type PanelToBg =
   | { type: 'panel:ready' }
-  | { type: 'panel:summarize' }
+  | { type: 'panel:summarize'; refresh?: boolean }
   | { type: 'panel:ping' }
   | { type: 'panel:closed' }
   | { type: 'panel:rememberUrl'; url: string }
@@ -58,6 +58,7 @@ const metricsEl = byId<HTMLDivElement>('metrics')
 
 const summarizeBtn = byId<HTMLButtonElement>('summarize')
 const drawerToggleBtn = byId<HTMLButtonElement>('drawerToggle')
+const refreshBtn = byId<HTMLButtonElement>('refresh')
 const advancedBtn = byId<HTMLButtonElement>('advanced')
 const autoEl = byId<HTMLInputElement>('auto')
 const lengthRoot = byId<HTMLDivElement>('lengthRoot')
@@ -674,6 +675,7 @@ function toggleDrawer(force?: boolean, opts?: { animate?: boolean }) {
 }
 
 summarizeBtn.addEventListener('click', () => send({ type: 'panel:summarize' }))
+refreshBtn.addEventListener('click', () => send({ type: 'panel:summarize', refresh: true }))
 drawerToggleBtn.addEventListener('click', () => toggleDrawer())
 advancedBtn.addEventListener('click', () => send({ type: 'panel:openOptions' }))
 
@@ -720,6 +722,19 @@ void (async () => {
 setInterval(() => {
   send({ type: 'panel:ping' })
 }, 25_000)
+
+window.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' || !event.shiftKey) return
+  const target = event.target as HTMLElement | null
+  if (
+    target &&
+    (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+  ) {
+    return
+  }
+  event.preventDefault()
+  send({ type: 'panel:summarize', refresh: true })
+})
 
 window.addEventListener('beforeunload', () => {
   send({ type: 'panel:closed' })

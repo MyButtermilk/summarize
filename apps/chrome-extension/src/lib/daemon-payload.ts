@@ -10,9 +10,11 @@ export type ExtractedPage = {
 export function buildDaemonRequestBody({
   extracted,
   settings,
+  noCache,
 }: {
   extracted: ExtractedPage
   settings: Settings
+  noCache?: boolean
 }): Record<string, unknown> {
   const promptOverride = settings.promptOverride?.trim()
   return {
@@ -24,6 +26,7 @@ export function buildDaemonRequestBody({
     length: settings.length,
     language: settings.language,
     ...(promptOverride ? { prompt: promptOverride } : {}),
+    ...(noCache ? { noCache: true } : {}),
     mode: 'auto',
     maxCharacters: settings.maxChars,
   }

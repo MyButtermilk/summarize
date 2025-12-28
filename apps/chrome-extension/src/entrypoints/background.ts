@@ -5,7 +5,7 @@ import { loadSettings, patchSettings } from '../lib/settings'
 
 type PanelToBg =
   | { type: 'panel:ready' }
-  | { type: 'panel:summarize' }
+  | { type: 'panel:summarize'; refresh?: boolean }
   | { type: 'panel:ping' }
   | { type: 'panel:closed' }
   | { type: 'panel:rememberUrl'; url: string }
@@ -235,11 +235,12 @@ export default defineBackground(() => {
     void send({ type: 'ui:state', state })
   }
 
-  const summarizeActiveTab = async (reason: string) => {
+  const summarizeActiveTab = async (reason: string, opts?: { refresh?: boolean }) => {
     if (!isPanelOpen()) return
 
     const settings = await loadSettings()
-    if (reason !== 'manual' && reason !== 'length-change' && !settings.autoSummarize) return
+    const isManual = reason === 'manual' || reason === 'refresh' || reason === 'length-change'
+    if (!isManual && !settings.autoSummarize) return
     if (!settings.token.trim()) {
       await emitState('Setup required (missing token)')
       return
@@ -268,8 +269,7 @@ export default defineBackground(() => {
     if (
       settings.autoSummarize &&
       (lastSummarizedUrl === extracted.url || inflightUrl === extracted.url) &&
-      reason !== 'manual' &&
-      reason !== 'length-change'
+      !isManual
     ) {
       sendStatus('')
       return
@@ -285,9 +285,13 @@ export default defineBackground(() => {
           Authorization: `Bearer ${settings.token.trim()}`,
           'content-type': 'application/json',
         },
-        body: JSON.stringify({
-          ...buildDaemonRequestBody({ extracted, settings }),
-        }),
+        body: JSON.stringify(
+          buildDaemonRequestBody({
+            extracted,
+            settings,
+            noCache: Boolean(opts?.refresh),
+          })
+        ),
         signal: runController.signal,
       })
       const json = (await res.json()) as { ok: boolean; id?: string; error?: string }
@@ -334,7 +338,9 @@ export default defineBackground(() => {
         inflightUrl = null
         break
       case 'panel:summarize':
-        void summarizeActiveTab('manual')
+        void summarizeActiveTab((msg as { refresh?: boolean }).refresh ? 'refresh' : 'manual', {
+          refresh: Boolean((msg as { refresh?: boolean }).refresh),
+        })
         break
       case 'panel:ping':
         break
