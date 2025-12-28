@@ -591,7 +591,7 @@ button.ghost:hover {
 
 .drawerGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   align-items: end;
 }
@@ -625,22 +625,20 @@ button.ghost:hover {
   min-width: 0;
   color: var(--text);
   font-size: 12px;
+  align-self: center;
 }
 
-.drawerRow {
+.drawerFooter {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-  margin-top: 12px;
+  justify-content: flex-end;
+  margin-top: 10px;
 }
 
-.drawerRow #lengthRoot {
-  flex: 0 0 auto;
-  min-width: 140px;
+#lengthRoot {
+  min-width: 0;
 }
 
-.drawerRow label.length.mini {
+label.length.mini {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -648,22 +646,18 @@ button.ghost:hover {
   font-size: 12px;
 }
 
-.drawerRow label.length.mini .combo {
+label.length.mini .combo {
   display: flex;
   gap: 8px;
 }
 
-.drawerRow label.length.mini .pickerTrigger {
+label.length.mini .pickerTrigger {
   padding: 6px 10px;
   min-width: 92px;
 }
 
-.drawerRow label.length.mini input[type="text"] {
+label.length.mini input[type="text"] {
   width: 104px;
-}
-
-.drawerRow #advanced {
-  margin-top: -1px;
 }
 
 .drawer .combo {

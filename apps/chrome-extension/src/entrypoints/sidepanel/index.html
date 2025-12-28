@@ -30,20 +30,20 @@
     <section id="drawer" class="drawer hidden" aria-label="Controls">
       <div class="drawerGrid">
         <div id="pickersRoot"></div>
+        <div id="lengthRoot"></div>
         <label class="size">
           <span>Size</span>
           <input id="size" type="range" min="12" max="20" step="1" />
         </label>
+        <label class="toggleRow">
+          <input id="auto" type="checkbox" />
+          <span>Auto summarize</span>
+        </label>
       </div>
 
-	      <div class="drawerRow">
-	        <div id="lengthRoot"></div>
-	        <label class="toggleRow">
-	          <input id="auto" type="checkbox" />
-	          <span>Auto summarize</span>
-	        </label>
-	        <button id="advanced" type="button" class="ghost">Advanced…</button>
-	      </div>
+      <div class="drawerFooter">
+        <button id="advanced" type="button" class="ghost">Advanced…</button>
+      </div>
     </section>
 
     <main>
