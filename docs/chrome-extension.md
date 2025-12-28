@@ -94,6 +94,13 @@ The daemon decides the best pipeline:
   - Prompt override (advanced): custom instruction prefix (context + content still appended).
   - Auto summarize: on/off.
   - Typography: font family (dropdown + custom), font size (slider).
+- Advanced overrides (hidden behind a toggle; overrides daemon config when enabled):
+  - Pipeline mode: `auto|page|url`.
+  - Firecrawl: `off|auto|always`.
+  - Markdown mode: `readability|llm|auto|off`.
+  - Preprocess: `off|auto|always`.
+  - YouTube mode: `auto|no-auto|yt-dlp|web|apify`.
+  - Timeout (e.g. `90s`, `2m`), retries, max output tokens (e.g. `2k`).
 - Extension includes current settings in request; daemon treats them like CLI flags (`--model`, `--length`, `--language`, `--prompt`).
 
 ## Token Pairing / Setup Mode

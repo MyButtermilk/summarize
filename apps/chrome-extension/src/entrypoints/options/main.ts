@@ -24,6 +24,16 @@ const languageCustomEl = byId<HTMLInputElement>('languageCustom')
 const promptOverrideEl = byId<HTMLTextAreaElement>('promptOverride')
 const autoToggleRoot = byId<HTMLDivElement>('autoToggle')
 const maxCharsEl = byId<HTMLInputElement>('maxChars')
+const advancedToggleRoot = byId<HTMLDivElement>('advancedToggle')
+const advancedFieldsEl = byId<HTMLDivElement>('advancedFields')
+const requestModeEl = byId<HTMLSelectElement>('requestMode')
+const firecrawlModeEl = byId<HTMLSelectElement>('firecrawlMode')
+const markdownModeEl = byId<HTMLSelectElement>('markdownMode')
+const preprocessModeEl = byId<HTMLSelectElement>('preprocessMode')
+const youtubeModeEl = byId<HTMLSelectElement>('youtubeMode')
+const timeoutEl = byId<HTMLInputElement>('timeout')
+const retriesEl = byId<HTMLInputElement>('retries')
+const maxOutputTokensEl = byId<HTMLInputElement>('maxOutputTokens')
 const pickersRoot = byId<HTMLDivElement>('pickersRoot')
 const fontFamilyEl = byId<HTMLInputElement>('fontFamily')
 const fontSizeEl = byId<HTMLInputElement>('fontSize')
@@ -31,6 +41,7 @@ const buildInfoEl = document.getElementById('buildInfo')
 const daemonStatusEl = byId<HTMLDivElement>('daemonStatus')
 
 let autoValue = defaultSettings.autoSummarize
+let advancedOverrides = defaultSettings.advancedOverrides
 
 const setStatus = (text: string) => {
   statusEl.textContent = text
@@ -303,6 +314,25 @@ const autoToggle = mountCheckbox(autoToggleRoot, {
   },
 })
 
+const advancedToggle = mountCheckbox(advancedToggleRoot, {
+  id: 'options-advanced',
+  label: 'Enable advanced overrides',
+  checked: advancedOverrides,
+  onCheckedChange: (checked) => {
+    advancedOverrides = checked
+    updateAdvancedVisibility()
+  },
+})
+
+const updateAdvancedVisibility = () => {
+  advancedFieldsEl.hidden = !advancedOverrides
+  const controls = advancedFieldsEl.querySelectorAll('input, select, textarea')
+  controls.forEach((el) => {
+    ;(el as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement).disabled =
+      !advancedOverrides
+  })
+}
+
 async function load() {
   const s = await loadSettings()
   tokenEl.value = s.token
@@ -326,12 +356,31 @@ async function load() {
     },
   })
   maxCharsEl.value = String(s.maxChars)
+  advancedOverrides = s.advancedOverrides
+  advancedToggle.update({
+    id: 'options-advanced',
+    label: 'Enable advanced overrides',
+    checked: advancedOverrides,
+    onCheckedChange: (checked) => {
+      advancedOverrides = checked
+      updateAdvancedVisibility()
+    },
+  })
+  requestModeEl.value = s.requestMode
+  firecrawlModeEl.value = s.firecrawlMode
+  markdownModeEl.value = s.markdownMode
+  preprocessModeEl.value = s.preprocessMode
+  youtubeModeEl.value = s.youtubeMode
+  timeoutEl.value = s.timeout
+  retriesEl.value = String(s.retries)
+  maxOutputTokensEl.value = s.maxOutputTokens
   fontFamilyEl.value = s.fontFamily
   fontSizeEl.value = String(s.fontSize)
   currentScheme = s.colorScheme
   currentMode = s.colorMode
   pickers.update({ scheme: currentScheme, mode: currentMode, ...pickerHandlers })
   applyTheme({ scheme: s.colorScheme, mode: s.colorMode })
+  updateAdvancedVisibility()
 }
 
 let refreshTimer = 0
@@ -383,6 +432,20 @@ formEl.addEventListener('submit', (e) => {
       promptOverride: promptOverrideEl.value || defaultSettings.promptOverride,
       autoSummarize: autoValue,
       maxChars: Number(maxCharsEl.value) || defaultSettings.maxChars,
+      advancedOverrides,
+      requestMode: requestModeEl.value || defaultSettings.requestMode,
+      firecrawlMode: firecrawlModeEl.value || defaultSettings.firecrawlMode,
+      markdownMode: markdownModeEl.value || defaultSettings.markdownMode,
+      preprocessMode: preprocessModeEl.value || defaultSettings.preprocessMode,
+      youtubeMode: youtubeModeEl.value || defaultSettings.youtubeMode,
+      timeout: timeoutEl.value || defaultSettings.timeout,
+      retries: (() => {
+        const raw = retriesEl.value.trim()
+        if (!raw) return defaultSettings.retries
+        const parsed = Number(raw)
+        return Number.isFinite(parsed) ? parsed : defaultSettings.retries
+      })(),
+      maxOutputTokens: maxOutputTokensEl.value || defaultSettings.maxOutputTokens,
       colorScheme: currentScheme || defaultSettings.colorScheme,
       colorMode: currentMode || defaultSettings.colorMode,
       fontFamily: fontFamilyEl.value || defaultSettings.fontFamily,

@@ -7,6 +7,7 @@ import { runUrlFlow } from '../run/flows/url/flow.js'
 import { buildUrlPrompt, summarizeExtractedUrl } from '../run/flows/url/summary.js'
 
 import { createDaemonUrlFlowContext } from './flow-context.js'
+import type { DaemonRunOverrides } from './request-settings.js'
 import { countWords, estimateDurationSecondsFromWords, formatInputSummary } from './meta.js'
 import { formatProgress } from './summarize-progress.js'
 
@@ -152,6 +153,7 @@ export async function streamSummaryForVisiblePage({
   languageRaw,
   sink,
   cache,
+  overrides,
 }: {
   env: Record<string, string | undefined>
   fetchImpl: typeof fetch
@@ -162,6 +164,7 @@ export async function streamSummaryForVisiblePage({
   languageRaw: unknown
   sink: StreamSink
   cache: CacheState
+  overrides: DaemonRunOverrides
 }): Promise<{ usedModel: string; metrics: VisiblePageMetrics }> {
   const startedAt = Date.now()
   let usedModel: string | null = null
@@ -178,6 +181,7 @@ export async function streamSummaryForVisiblePage({
     lengthRaw,
     languageRaw,
     maxExtractCharacters: null,
+    overrides,
     hooks: {
       onModelChosen: (modelId) => {
         usedModel = modelId
@@ -295,6 +299,7 @@ export async function streamSummaryForUrl({
   languageRaw,
   sink,
   cache,
+  overrides,
 }: {
   env: Record<string, string | undefined>
   fetchImpl: typeof fetch
@@ -305,6 +310,7 @@ export async function streamSummaryForUrl({
   languageRaw: unknown
   sink: StreamSink
   cache: CacheState
+  overrides: DaemonRunOverrides
 }): Promise<{ usedModel: string; metrics: VisiblePageMetrics }> {
   const startedAt = Date.now()
   let usedModel: string | null = null
@@ -323,6 +329,7 @@ export async function streamSummaryForUrl({
     languageRaw,
     maxExtractCharacters:
       input.maxCharacters && input.maxCharacters > 0 ? input.maxCharacters : null,
+    overrides,
     hooks: {
       onModelChosen: (modelId) => {
         usedModel = modelId

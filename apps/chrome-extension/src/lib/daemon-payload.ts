@@ -17,6 +17,9 @@ export function buildDaemonRequestBody({
   noCache?: boolean
 }): Record<string, unknown> {
   const promptOverride = settings.promptOverride?.trim()
+  const advancedEnabled = settings.advancedOverrides
+  const maxOutputTokens = settings.maxOutputTokens?.trim()
+  const timeout = settings.timeout?.trim()
   return {
     url: extracted.url,
     title: extracted.title,
@@ -27,7 +30,18 @@ export function buildDaemonRequestBody({
     language: settings.language,
     ...(promptOverride ? { prompt: promptOverride } : {}),
     ...(noCache ? { noCache: true } : {}),
-    mode: 'auto',
+    ...(advancedEnabled
+      ? {
+          mode: settings.requestMode,
+          firecrawl: settings.firecrawlMode,
+          markdownMode: settings.markdownMode,
+          preprocess: settings.preprocessMode,
+          youtube: settings.youtubeMode,
+          ...(timeout ? { timeout } : {}),
+          ...(Number.isFinite(settings.retries) ? { retries: settings.retries } : {}),
+          ...(maxOutputTokens ? { maxOutputTokens } : {}),
+        }
+      : { mode: 'auto' }),
     maxCharacters: settings.maxChars,
   }
 }

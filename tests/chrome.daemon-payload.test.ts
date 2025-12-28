@@ -27,4 +27,47 @@ describe('chrome/daemon-payload', () => {
       maxCharacters: defaultSettings.maxChars,
     })
   })
+
+  it('includes advanced overrides when enabled', () => {
+    const body = buildDaemonRequestBody({
+      extracted: {
+        url: 'https://example.com/article',
+        title: 'Hello',
+        text: 'Content',
+        truncated: false,
+      },
+      settings: {
+        ...defaultSettings,
+        token: 't',
+        advancedOverrides: true,
+        requestMode: 'url',
+        firecrawlMode: 'auto',
+        markdownMode: 'llm',
+        preprocessMode: 'always',
+        youtubeMode: 'no-auto',
+        timeout: '90s',
+        retries: 2,
+        maxOutputTokens: '2k',
+      },
+    })
+
+    expect(body).toEqual({
+      url: 'https://example.com/article',
+      title: 'Hello',
+      text: 'Content',
+      truncated: false,
+      model: 'auto',
+      length: 'xl',
+      language: 'auto',
+      mode: 'url',
+      firecrawl: 'auto',
+      markdownMode: 'llm',
+      preprocess: 'always',
+      youtube: 'no-auto',
+      timeout: '90s',
+      retries: 2,
+      maxOutputTokens: '2k',
+      maxCharacters: defaultSettings.maxChars,
+    })
+  })
 })

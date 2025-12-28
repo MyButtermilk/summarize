@@ -9,6 +9,15 @@ import { type DaemonRequestedMode, resolveAutoDaemonMode } from './auto-mode.js'
 import type { DaemonConfig } from './config.js'
 import { DAEMON_HOST, DAEMON_PORT_DEFAULT } from './constants.js'
 import { buildModelPickerOptions } from './models.js'
+import {
+  resolveDaemonFirecrawlMode,
+  resolveDaemonMarkdownMode,
+  resolveDaemonMaxOutputTokens,
+  resolveDaemonPreprocessMode,
+  resolveDaemonRetries,
+  resolveDaemonTimeoutMs,
+  resolveDaemonYoutubeMode,
+} from './request-settings.js'
 import { streamSummaryForUrl, streamSummaryForVisiblePage } from './summarize.js'
 
 type SessionEvent =
@@ -279,6 +288,13 @@ export async function runDaemonServer({
           typeof obj.maxCharacters === 'number' && Number.isFinite(obj.maxCharacters)
             ? obj.maxCharacters
             : null
+        const firecrawlMode = resolveDaemonFirecrawlMode(obj.firecrawl)
+        const markdownMode = resolveDaemonMarkdownMode(obj.markdownMode)
+        const preprocessMode = resolveDaemonPreprocessMode(obj.preprocess)
+        const youtubeMode = resolveDaemonYoutubeMode(obj.youtube)
+        const timeoutMs = resolveDaemonTimeoutMs(obj.timeout)
+        const retries = resolveDaemonRetries(obj.retries)
+        const maxOutputTokensArg = resolveDaemonMaxOutputTokens(obj.maxOutputTokens)
         const hasText = Boolean(textContent.trim())
         if (!pageUrl || !/^https?:\/\//i.test(pageUrl)) {
           json(res, 400, { ok: false, error: 'missing url' }, cors)
@@ -334,6 +350,16 @@ export async function runDaemonServer({
               ? { ...cacheState, mode: 'bypass' as const, store: null }
               : cacheState
 
+            const overrides = {
+              firecrawlMode,
+              markdownMode,
+              preprocessMode,
+              youtubeMode,
+              timeoutMs,
+              retries,
+              maxOutputTokensArg,
+            }
+
             const runWithMode = async (resolved: 'url' | 'page') => {
               return resolved === 'url'
                 ? await streamSummaryForUrl({
@@ -346,6 +372,7 @@ export async function runDaemonServer({
                     input: { url: pageUrl, title, maxCharacters },
                     sink,
                     cache: requestCache,
+                    overrides,
                   })
                 : await streamSummaryForVisiblePage({
                     env,
@@ -357,6 +384,7 @@ export async function runDaemonServer({
                     input: { url: pageUrl, title, text: textContent, truncated },
                     sink,
                     cache: requestCache,
+                    overrides,
                   })
             }
 

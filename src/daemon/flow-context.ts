@@ -15,7 +15,11 @@ import { resolveModelSelection } from '../run/run-models.js'
 import { resolveDesiredOutputTokens } from '../run/run-output.js'
 import { createSummaryEngine } from '../run/summary-engine.js'
 
-import { resolveDaemonOutputLanguage, resolveDaemonSummaryLength } from './request-settings.js'
+import {
+  type DaemonRunOverrides,
+  resolveDaemonOutputLanguage,
+  resolveDaemonSummaryLength,
+} from './request-settings.js'
 
 type TextSink = {
   writeChunk: (text: string) => void
@@ -43,6 +47,7 @@ export type DaemonUrlFlowContextArgs = {
   lengthRaw: unknown
   languageRaw: unknown
   maxExtractCharacters: number | null
+  overrides: DaemonRunOverrides
   hooks?: {
     onModelChosen?: ((modelId: string) => void) | null
     onExtracted?: ((extracted: ExtractedLinkContent) => void) | null
@@ -63,6 +68,7 @@ export function createDaemonUrlFlowContext(args: DaemonUrlFlowContextArgs): UrlF
     lengthRaw,
     languageRaw,
     maxExtractCharacters,
+    overrides,
     hooks,
     runStartedAtMs,
     stdoutSink,
@@ -133,12 +139,20 @@ export function createDaemonUrlFlowContext(args: DaemonUrlFlowContextArgs): UrlF
     requestedModel.kind === 'fixed' ? requestedModel : null
 
   const { lengthArg } = resolveDaemonSummaryLength(lengthRaw)
-  const desiredOutputTokens = resolveDesiredOutputTokens({ lengthArg, maxOutputTokensArg: null })
+  const maxOutputTokensArg = overrides.maxOutputTokensArg
+  const desiredOutputTokens = resolveDesiredOutputTokens({ lengthArg, maxOutputTokensArg })
 
-  const metrics = createRunMetrics({ env: envForRun, fetchImpl, maxOutputTokensArg: null })
+  const metrics = createRunMetrics({ env: envForRun, fetchImpl, maxOutputTokensArg })
 
   const stdout = createWritableFromTextSink(stdoutSink)
   const stderr = process.stderr
+
+  const timeoutMs = overrides.timeoutMs ?? 120_000
+  const retries = overrides.retries ?? 1
+  const firecrawlMode = overrides.firecrawlMode ?? 'off'
+  const markdownMode = overrides.markdownMode ?? 'readability'
+  const preprocessMode = overrides.preprocessMode ?? 'off'
+  const youtubeMode = overrides.youtubeMode ?? 'auto'
 
   const summaryEngine = createSummaryEngine({
     env: envForRun,
@@ -146,8 +160,8 @@ export function createDaemonUrlFlowContext(args: DaemonUrlFlowContextArgs): UrlF
     stdout,
     stderr,
     execFileImpl: execFile as unknown as ExecFileFn,
-    timeoutMs: 120_000,
-    retries: 1,
+    timeoutMs,
+    retries,
     streamingEnabled: true,
     plain: true,
     verbose: false,
@@ -200,8 +214,8 @@ export function createDaemonUrlFlowContext(args: DaemonUrlFlowContextArgs): UrlF
     stdout,
     stderr,
     execFileImpl: execFile as unknown as ExecFileFn,
-    timeoutMs: 120_000,
-    preprocessMode: 'off',
+    timeoutMs,
+    preprocessMode,
     format: 'text',
     lengthArg,
     outputLanguage,
@@ -220,7 +234,7 @@ export function createDaemonUrlFlowContext(args: DaemonUrlFlowContextArgs): UrlF
     requestedModelLabel,
     wantsFreeNamedModel,
     isNamedModelSelection,
-    maxOutputTokensArg: null,
+    maxOutputTokensArg,
     json: false,
     metricsEnabled: false,
     metricsDetailed: false,
@@ -263,21 +277,21 @@ export function createDaemonUrlFlowContext(args: DaemonUrlFlowContextArgs): UrlF
       fetch: metrics.trackedFetch,
     },
     flags: {
-      timeoutMs: 120_000,
+      timeoutMs,
       maxExtractCharacters,
-      retries: 1,
+      retries,
       format: 'text',
-      markdownMode: 'readability',
-      preprocessMode: 'off',
-      youtubeMode: 'auto',
-      firecrawlMode: 'off',
+      markdownMode,
+      preprocessMode,
+      youtubeMode,
+      firecrawlMode,
       videoMode,
       outputLanguage,
       lengthArg,
       promptOverride,
       lengthInstruction,
       languageInstruction,
-      maxOutputTokensArg: null,
+      maxOutputTokensArg,
       json: false,
       extractMode: false,
       metricsEnabled: false,

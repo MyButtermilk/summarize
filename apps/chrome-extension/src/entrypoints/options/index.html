@@ -103,6 +103,73 @@
         </section>
 
         <section class="section">
+          <div class="sectionHeader">
+            <h2>Advanced overrides</h2>
+            <div id="advancedToggle" class="row"></div>
+          </div>
+          <div class="hint">
+            When enabled, these values are sent with each request and override the daemon config.
+          </div>
+          <div id="advancedFields" class="advancedFields" hidden>
+            <label>
+              <span>Pipeline mode</span>
+              <select id="requestMode">
+                <option value="auto">Auto</option>
+                <option value="page">Page (use visible text)</option>
+                <option value="url">URL (force URL extraction)</option>
+              </select>
+            </label>
+            <label>
+              <span>Firecrawl</span>
+              <select id="firecrawlMode">
+                <option value="off">Off</option>
+                <option value="auto">Auto</option>
+                <option value="always">Always</option>
+              </select>
+            </label>
+            <label>
+              <span>Markdown mode</span>
+              <select id="markdownMode">
+                <option value="readability">Readability</option>
+                <option value="llm">LLM</option>
+                <option value="auto">Auto</option>
+                <option value="off">Off</option>
+              </select>
+            </label>
+            <label>
+              <span>Preprocess</span>
+              <select id="preprocessMode">
+                <option value="off">Off</option>
+                <option value="auto">Auto</option>
+                <option value="always">Always</option>
+              </select>
+            </label>
+            <label>
+              <span>YouTube mode</span>
+              <select id="youtubeMode">
+                <option value="auto">Auto</option>
+                <option value="no-auto">No auto captions</option>
+                <option value="yt-dlp">yt-dlp</option>
+                <option value="web">Web</option>
+                <option value="apify">Apify</option>
+              </select>
+            </label>
+            <label>
+              <span>Timeout</span>
+              <input id="timeout" type="text" placeholder="2m" />
+            </label>
+            <label>
+              <span>Retries</span>
+              <input id="retries" type="number" min="0" max="5" step="1" />
+            </label>
+            <label>
+              <span>Max output tokens</span>
+              <input id="maxOutputTokens" type="text" placeholder="2k" />
+            </label>
+          </div>
+        </section>
+
+        <section class="section">
           <h2>UI</h2>
           <div class="uiGrid">
             <div id="pickersRoot"></div>

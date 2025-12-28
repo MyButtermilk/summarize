@@ -399,6 +399,18 @@ form {
   gap: 8px;
 }
 
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.advancedFields {
+  display: grid;
+  gap: 8px;
+}
+
 .section h2 {
   margin: 0;
   font-size: 13px;
