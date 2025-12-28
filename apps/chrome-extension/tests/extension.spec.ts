@@ -150,6 +150,35 @@ test('sidepanel mode picker updates theme mode', async () => {
   }
 })
 
+test('sidepanel custom length input accepts typing', async () => {
+  const harness = await launchExtension()
+
+  try {
+    const page = await openExtensionPage(harness, 'sidepanel.html', '#title')
+    await page.click('#drawerToggle')
+    await expect(page.locator('#drawer')).toBeVisible()
+
+    const lengthLabel = page.locator('label.length.mini')
+    const lengthTrigger = lengthLabel.locator('.pickerTrigger').first()
+
+    await lengthTrigger.click()
+    const lengthList = getOpenPickerList(page)
+    await expect(lengthList).toBeVisible()
+    await lengthList.locator('.pickerOption', { hasText: 'Custom…' }).click()
+
+    const customInput = page.locator('#lengthCustom')
+    await expect(customInput).toBeVisible()
+    await expect(customInput).toBeFocused()
+    await customInput.fill('20k')
+    await expect(customInput).toHaveValue('20k')
+    await expect(customInput).toBeFocused()
+
+    assertNoErrors(harness)
+  } finally {
+    await closeExtension(harness.context, harness.userDataDir)
+  }
+})
+
 test('options pickers support keyboard selection', async () => {
   const harness = await launchExtension()
 
