@@ -44,8 +44,13 @@ const optionsWindowSize = { width: 900, height: 980 }
 const optionsWindowMin = { width: 760, height: 820 }
 const optionsWindowMargin = 20
 
+function resolveOptionsUrl(): string {
+  const page = chrome.runtime.getManifest().options_ui?.page ?? 'options.html'
+  return chrome.runtime.getURL(page)
+}
+
 async function openOptionsWindow() {
-  const url = chrome.runtime.getURL('options/index.html')
+  const url = resolveOptionsUrl()
   try {
     if (chrome.windows?.create) {
       const current = await chrome.windows.getCurrent()
