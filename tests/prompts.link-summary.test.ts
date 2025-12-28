@@ -105,7 +105,7 @@ describe('buildLinkSummaryPrompt', () => {
       title: null,
       siteName: null,
       description: null,
-      content: 'Body',
+      content: 'x'.repeat(12_000),
       truncated: false,
       hasTranscript: false,
       outputLanguage: { kind: 'fixed', tag: 'en', label: 'English' },
