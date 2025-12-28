@@ -643,8 +643,7 @@ button.ghost:hover {
 }
 
 .checkboxRoot:hover .checkboxControl {
-  border-color: color-mix(in srgb, var(--ui-focus) 35%, var(--border));
-  background: color-mix(in srgb, var(--field-bg) 70%, var(--ui-focus));
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
 }
 
 .checkboxRoot[data-disabled] {
