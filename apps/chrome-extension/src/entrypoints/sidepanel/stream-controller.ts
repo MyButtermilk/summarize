@@ -1,13 +1,7 @@
+import { type SseMetaData, parseSseEvent } from '../../../../../src/shared/sse-events.js'
 import { mergeStreamingChunk } from '../../../../../src/shared/streaming-merge.js'
 import { parseSseStream } from '../../lib/sse'
 import type { RunStart } from './types'
-
-type StreamMeta = {
-  model?: string | null
-  modelLabel?: string | null
-  inputSummary?: string | null
-  summaryFromCache?: boolean | null
-}
 
 export type StreamController = {
   start: (run: RunStart) => Promise<void>
@@ -38,7 +32,7 @@ export function createStreamController({
   onBaseSubtitle: (text: string) => void
   onStreamStateChange: (streaming: boolean) => void
   onRememberUrl: (url: string) => void
-  onMeta: (meta: StreamMeta) => void
+  onMeta: (meta: SseMetaData) => void
   onSummaryFromCache: (value: boolean | null) => void
   onMetrics: (summary: string) => void
   onRender: (markdown: string) => void
@@ -109,37 +103,35 @@ export function createStreamController({
       for await (const msg of parseSseStream(res.body)) {
         if (nextController.signal.aborted) return
 
-        if (msg.event === 'chunk') {
-          const data = JSON.parse(msg.data) as { text: string }
-          const merged = mergeStreamingChunk(markdown, data.text).next
+        const event = parseSseEvent(msg)
+        if (!event) continue
+
+        if (event.event === 'chunk') {
+          const merged = mergeStreamingChunk(markdown, event.data.text).next
           if (merged !== markdown) {
             markdown = merged
             queueRender()
           }
 
-          if (!streamedAnyNonWhitespace && data.text.trim().length > 0) {
+          if (!streamedAnyNonWhitespace && event.data.text.trim().length > 0) {
             streamedAnyNonWhitespace = true
             if (!rememberedUrl) {
               rememberedUrl = true
               onRememberUrl(run.url)
             }
           }
-        } else if (msg.event === 'meta') {
-          const data = JSON.parse(msg.data) as StreamMeta
-          onMeta(data)
-          if (typeof data.summaryFromCache === 'boolean') {
-            onSummaryFromCache(data.summaryFromCache)
+        } else if (event.event === 'meta') {
+          onMeta(event.data)
+          if (typeof event.data.summaryFromCache === 'boolean') {
+            onSummaryFromCache(event.data.summaryFromCache)
           }
-        } else if (msg.event === 'status') {
-          const data = JSON.parse(msg.data) as { text: string }
-          if (!streamedAnyNonWhitespace) onStatus(data.text)
-        } else if (msg.event === 'metrics') {
-          const data = JSON.parse(msg.data) as { summary: string }
-          onMetrics(data.summary)
-        } else if (msg.event === 'error') {
-          const data = JSON.parse(msg.data) as { message: string }
-          throw new Error(data.message)
-        } else if (msg.event === 'done') {
+        } else if (event.event === 'status') {
+          if (!streamedAnyNonWhitespace) onStatus(event.data.text)
+        } else if (event.event === 'metrics') {
+          onMetrics(event.data.summary)
+        } else if (event.event === 'error') {
+          throw new Error(event.data.message)
+        } else if (event.event === 'done') {
           break
         }
       }

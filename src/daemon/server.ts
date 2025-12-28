@@ -4,6 +4,7 @@ import type { CacheState } from '../cache.js'
 import { loadSummarizeConfig } from '../config.js'
 import { createCacheStateFromConfig, refreshCacheStoreIfMissing } from '../run/cache-state.js'
 import { formatModelLabelForDisplay } from '../run/finish-line.js'
+import { type SseEvent, encodeSseEvent } from '../shared/sse-events.js'
 import { resolvePackageVersion } from '../version.js'
 import { type DaemonRequestedMode, resolveAutoDaemonMode } from './auto-mode.js'
 import type { DaemonConfig } from './config.js'
@@ -12,30 +13,7 @@ import { buildModelPickerOptions } from './models.js'
 import { resolveDaemonRunOverrides } from './request-settings.js'
 import { streamSummaryForUrl, streamSummaryForVisiblePage } from './summarize.js'
 
-type SessionEvent =
-  | {
-      event: 'meta'
-      data: {
-        model: string | null
-        modelLabel: string | null
-        inputSummary: string | null
-        summaryFromCache?: boolean | null
-      }
-    }
-  | { event: 'status'; data: { text: string } }
-  | { event: 'chunk'; data: { text: string } }
-  | {
-      event: 'metrics'
-      data: {
-        elapsedMs: number
-        summary: string
-        details: string | null
-        summaryDetailed: string
-        detailsDetailed: string | null
-      }
-    }
-  | { event: 'done'; data: Record<string, never> }
-  | { event: 'error'; data: { message: string } }
+type SessionEvent = SseEvent
 
 type Session = {
   id: string
@@ -104,10 +82,6 @@ function corsHeaders(origin: string | null): Record<string, string> {
   }
 }
 
-function sseEncode(event: SessionEvent): string {
-  return `event: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`
-}
-
 function readBearerToken(req: http.IncomingMessage): string | null {
   const header = req.headers.authorization
   if (typeof header !== 'string') return null
@@ -144,7 +118,7 @@ const MAX_SESSION_BUFFER_EVENTS = 2000
 const MAX_SESSION_BUFFER_BYTES = 512 * 1024
 
 function pushToSession(session: Session, evt: SessionEvent) {
-  const encoded = sseEncode(evt)
+  const encoded = encodeSseEvent(evt)
   for (const res of session.clients) {
     res.write(encoded)
   }
@@ -454,7 +428,7 @@ export async function runDaemonServer({
         session.clients.add(res)
 
         for (const entry of session.buffer) {
-          res.write(sseEncode(entry.event))
+          res.write(encodeSseEvent(entry.event))
         }
         if (session.done) {
           res.end()
