@@ -2,6 +2,8 @@ import { normalizeProps, useMachine } from '@zag-js/preact'
 import * as select from '@zag-js/select'
 import { useEffect, useMemo, useRef } from 'preact/hooks'
 
+const OPEN_EVENT = 'summarize:select-open'
+
 export type SelectItem = {
   label: string
   value: string
@@ -43,6 +45,23 @@ export function useZagSelect({ id, items, value, onValueChange }: UseZagSelectAr
   const api = select.connect(service, normalizeProps)
   const apiRef = useRef(api)
   apiRef.current = api
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ id?: string }>).detail
+      if (!detail || detail.id === id) return
+      apiRef.current.setOpen(false)
+    }
+    window.addEventListener(OPEN_EVENT, handler as EventListener)
+    return () => {
+      window.removeEventListener(OPEN_EVENT, handler as EventListener)
+    }
+  }, [id])
+
+  useEffect(() => {
+    if (!api.open) return
+    window.dispatchEvent(new CustomEvent(OPEN_EVENT, { detail: { id } }))
+  }, [api.open, id])
 
   useEffect(() => {
     const nextValue = value ? [value] : []
