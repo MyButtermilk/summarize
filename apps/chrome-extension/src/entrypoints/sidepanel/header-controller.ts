@@ -96,7 +96,7 @@ export function createHeaderController({
       trimmed.length > 0 &&
       (trimmed.toLowerCase().startsWith('error:') || trimmed.toLowerCase().includes(' error'))
     const split = splitStatusPercent(text)
-    const { summaryFromCache } = getState()
+    const { summaryFromCache, phase } = getState()
     if (split.percent && summaryFromCache !== true) {
       armProgress()
     } else if (trimmed && summaryFromCache !== true && !isError) {
