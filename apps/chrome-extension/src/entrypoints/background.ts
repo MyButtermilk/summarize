@@ -351,7 +351,10 @@ export default defineBackground(() => {
         break
       case 'panel:setLength':
         void (async () => {
-          await patchSettings({ length: (msg as { value: string }).value })
+          const next = (msg as { value: string }).value
+          const current = await loadSettings()
+          if (current.length === next) return
+          await patchSettings({ length: next })
           void emitState('')
           void summarizeActiveTab('length-change')
         })()
