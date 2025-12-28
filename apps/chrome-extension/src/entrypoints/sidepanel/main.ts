@@ -227,6 +227,24 @@ function renderMetricsSummary(summary: string) {
       metricsEl.append(link)
       return
     }
+    const sourceUrl = currentSource?.url ?? null
+    if (sourceUrl && isHttpUrl(sourceUrl)) {
+      const sourceMatch = part.match(/\b(YouTube|podcast|video)\b/i)
+      if (sourceMatch?.index != null) {
+        const before = part.slice(0, sourceMatch.index)
+        const label = sourceMatch[0]
+        const after = part.slice(sourceMatch.index + label.length)
+        if (before) metricsEl.append(document.createTextNode(before))
+        const link = document.createElement('a')
+        link.href = sourceUrl
+        link.textContent = label
+        link.target = '_blank'
+        link.rel = 'noopener noreferrer'
+        metricsEl.append(link)
+        if (after) metricsEl.append(document.createTextNode(after))
+        return
+      }
+    }
     metricsEl.append(document.createTextNode(part))
   })
 }
