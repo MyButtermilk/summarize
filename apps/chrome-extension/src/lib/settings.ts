@@ -10,6 +10,7 @@ import {
 export type Settings = {
   token: string
   autoSummarize: boolean
+  hoverSummaries: boolean
   model: string
   length: string
   language: string
@@ -156,6 +157,7 @@ function normalizeMaxOutputTokens(value: unknown): string {
 export const defaultSettings: Settings = {
   token: '',
   autoSummarize: true,
+  hoverSummaries: false,
   model: 'auto',
   length: 'xl',
   language: 'auto',
@@ -188,6 +190,8 @@ export async function loadSettings(): Promise<Settings> {
     promptOverride: normalizePromptOverride(raw.promptOverride),
     autoSummarize:
       typeof raw.autoSummarize === 'boolean' ? raw.autoSummarize : defaultSettings.autoSummarize,
+    hoverSummaries:
+      typeof raw.hoverSummaries === 'boolean' ? raw.hoverSummaries : defaultSettings.hoverSummaries,
     maxChars: typeof raw.maxChars === 'number' ? raw.maxChars : defaultSettings.maxChars,
     requestMode: normalizeRequestMode(raw.requestMode),
     firecrawlMode: normalizeFirecrawlMode(raw.firecrawlMode),

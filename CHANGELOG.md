@@ -6,6 +6,7 @@
 
 - Streaming: flush deltas without newline gating for faster panel updates.
 - Chrome Side Panel: dynamically shorten `openrouter/` to `or/` in the metrics footer when it wraps.
+- Chrome extension: add optional hover tooltip summaries for links (advanced setting, default off).
 
 ### Fixes
 
