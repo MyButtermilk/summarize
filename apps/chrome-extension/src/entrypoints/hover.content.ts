@@ -211,6 +211,12 @@ export default defineContentScript({
     let renderQueued = 0
     let cachedScrollHandler = 0
 
+    const logHover = (event: string, detail?: Record<string, unknown>) => {
+      if (!settings?.extendedLogging) return
+      const payload = detail ? { event, ...detail } : { event }
+      console.debug('[summarize][hover]', payload)
+    }
+
     const clearHoverTimer = () => {
       if (hoverTimer == null) return
       window.clearTimeout(hoverTimer)
@@ -250,8 +256,14 @@ export default defineContentScript({
       if (!activeAnchor) return
       if (!activeUrl) return
       if (!activeRequestId) return
-      if (msg.requestId !== activeRequestId) return
-      if (msg.url !== activeUrl) return
+      if (msg.requestId !== activeRequestId) {
+        logHover('drop', { reason: 'requestId', activeRequestId, msgRequestId: msg.requestId })
+        return
+      }
+      if (msg.url !== activeUrl) {
+        logHover('drop', { reason: 'url', activeUrl, msgUrl: msg.url })
+        return
+      }
 
       if (msg.type === 'hover:chunk') {
         activeHasChunk = true
@@ -326,6 +338,7 @@ export default defineContentScript({
       activeAnchor = anchor
       activeUrl = url
       ensureScrollHandler()
+      logHover('start', { url, title: anchor.textContent?.trim() || null })
 
       const cached = cache.get(url)
       if (cached && Date.now() - cached.updatedAt < CACHE_TTL_MS) {
@@ -333,6 +346,7 @@ export default defineContentScript({
           cache.delete(url)
           return
         }
+        logHover('cache-hit', { url, ageMs: Date.now() - cached.updatedAt })
         showTooltip(anchor, cached.summary)
         activeHasShown = true
         return
@@ -360,6 +374,7 @@ export default defineContentScript({
 
         if (!res?.ok) throw new Error(res?.error || 'Failed to start hover summary')
       } catch {
+        logHover('start-failed', { url })
         if (activeAnchor && activeUrl === url) {
           if (!activeHasShown) hideTooltip()
         }
@@ -370,7 +385,15 @@ export default defineContentScript({
       if (!(event instanceof PointerEvent)) return
       const anchor = isAnchorTarget(event.target)
       if (!anchor) return
-      if (activeAnchor === anchor) return
+      if (activeAnchor === anchor) {
+        const resolved = resolveUrl(anchor)
+        if (resolved && resolved !== activeUrl) {
+          logHover('anchor-reused', { from: activeUrl, to: resolved })
+          clearActive()
+          scheduleHover(anchor)
+        }
+        return
+      }
       clearActive()
       scheduleHover(anchor)
     })

@@ -475,6 +475,11 @@ export default defineBackground(() => {
     }
 
     const settings = await loadSettings()
+    const logHover = (event: string, detail?: Record<string, unknown>) => {
+      if (!settings.extendedLogging) return
+      const payload = detail ? { event, ...detail } : { event }
+      console.debug('[summarize][hover:bg]', payload)
+    }
     const token = settings.token.trim()
     if (!token) {
       await sendHover(tabId, {
@@ -487,6 +492,7 @@ export default defineBackground(() => {
     }
 
     try {
+      logHover('start', { tabId, requestId: msg.requestId, url: msg.url })
       const base = buildDaemonRequestBody({
         extracted: { url: msg.url, title: msg.title, text: '', truncated: false },
         settings,
@@ -515,6 +521,7 @@ export default defineBackground(() => {
       }
 
       if (!isStillActive()) return
+      logHover('stream-start', { tabId, requestId: msg.requestId, url: msg.url, runId: json.id })
 
       const streamRes = await fetch(`http://127.0.0.1:8787/v1/summarize/${json.id}/events`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -543,9 +550,16 @@ export default defineBackground(() => {
       }
 
       if (!isStillActive()) return
+      logHover('done', { tabId, requestId: msg.requestId, url: msg.url })
       await sendHover(tabId, { type: 'hover:done', requestId: msg.requestId, url: msg.url })
     } catch (err) {
       if (!isStillActive()) return
+      logHover('error', {
+        tabId,
+        requestId: msg.requestId,
+        url: msg.url,
+        message: err instanceof Error ? err.message : String(err),
+      })
       await sendHover(tabId, {
         type: 'hover:error',
         requestId: msg.requestId,
