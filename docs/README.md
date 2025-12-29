@@ -13,6 +13,7 @@ summary: "Docs index for summarize behaviors and modes."
 - `docs/language.md` — output language (`--language` / config `language`)
 - `docs/cache.md` — cache design + config (SQLite)
 - `docs/manual-tests.md` — manual end-to-end test checklist
+- `docs/releasing.md` — release checklist + Homebrew tap update
 - `docs/extract-only.md` — extract mode (no summary LLM call)
 
 ## Website

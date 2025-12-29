@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # summarize release helper (npm)
-# Phases: gates | build | publish | smoke | tag | chrome | all
+# Phases: gates | build | publish | smoke | tag | tap | chrome | all
 
 # npm@11 warns on unknown env configs; keep CI/logs clean.
 unset npm_config_manage_package_manager_versions || true
@@ -118,6 +118,41 @@ phase_tag() {
   run git push --tags
 }
 
+phase_tap() {
+  banner "Homebrew tap"
+  local version root_dir tap_dir formula_path url tmp_dir tarball sha
+  version="$(node -p 'require("./package.json").version')"
+  root_dir="$(pwd)"
+  tap_dir="${root_dir}/../homebrew-tap"
+  formula_path="${tap_dir}/Formula/summarize.rb"
+  if [ ! -d "${tap_dir}/.git" ]; then
+    echo "Missing tap repo at ${tap_dir}"
+    exit 1
+  fi
+  if ! git -C "${tap_dir}" diff --quiet || ! git -C "${tap_dir}" diff --cached --quiet; then
+    echo "Tap repo is dirty: ${tap_dir}"
+    exit 1
+  fi
+  url="https://github.com/steipete/summarize/releases/download/v${version}/summarize-macos-arm64-v${version}.tar.gz"
+  tmp_dir="$(mktemp -d)"
+  tarball="${tmp_dir}/summarize-macos-arm64-v${version}.tar.gz"
+  run curl -fsSL "${url}" -o "${tarball}"
+  sha="$(shasum -a 256 "${tarball}" | awk '{print $1}')"
+  run python3 - "${formula_path}" "${url}" "${sha}" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+path, url, sha = sys.argv[1:]
+data = Path(path).read_text()
+data = re.sub(r'^  url ".*"$', f'  url "{url}"', data, flags=re.M)
+data = re.sub(r'^  sha256 ".*"$', f'  sha256 "{sha}"', data, flags=re.M)
+Path(path).write_text(data)
+PY
+  echo "Tap updated: ${formula_path}"
+  echo "Next: git -C ${tap_dir} add ${formula_path} && git -C ${tap_dir} commit -m \"chore: bump summarize to v${version}\" && git -C ${tap_dir} push"
+}
+
 case "$PHASE" in
   gates) phase_gates ;;
   build) phase_build ;;
@@ -125,6 +160,7 @@ case "$PHASE" in
   publish) phase_publish ;;
   smoke) phase_smoke ;;
   tag) phase_tag ;;
+  tap) phase_tap ;;
   chrome) phase_chrome ;;
   all)
     phase_gates
@@ -133,6 +169,7 @@ case "$PHASE" in
     phase_publish
     phase_smoke
     phase_tag
+    phase_tap
     ;;
   *)
     echo "Usage: scripts/release.sh [phase]"
@@ -144,8 +181,9 @@ case "$PHASE" in
     echo "  publish   pnpm publish --tag latest --access public"
     echo "  smoke     npm view + pnpm dlx @steipete/summarize --help"
     echo "  tag       git tag vX.Y.Z + push tags"
+    echo "  tap       update homebrew-tap formula + sha"
     echo "  chrome    build + zip Chrome extension"
-    echo "  all       gates + build + verify + publish + smoke + tag"
+    echo "  all       gates + build + verify + publish + smoke + tag + tap"
     exit 2
     ;;
 esac
