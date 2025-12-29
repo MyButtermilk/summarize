@@ -125,87 +125,93 @@
           </h2>
           <div class="hint">Values set here override daemon config. Leave blank to use config.</div>
           <div id="advancedFields" class="advancedFields" hidden>
-            <div class="combo">
-              <div id="extendedLoggingToggle"></div>
-              <span class="subtitle">
-                Include full input + output in daemon logs (large, only when daemon logging is enabled).
-              </span>
-            </div>
-            <label>
-              <div class="labelRow">
-                <span>Hover summary prompt</span>
-                <button id="hoverPromptReset" type="button" class="miniButton">Reset</button>
+            <div class="advancedGrid">
+              <div class="combo span-2">
+                <div id="chatToggle"></div>
+                <span class="subtitle">Enable Chat mode in the side panel (default on).</span>
               </div>
-              <span class="subtitle">Prompt used for hover summaries in pages.</span>
-              <textarea id="hoverPrompt" rows="3"></textarea>
-            </label>
-            <label>
-              <span>Pipeline mode</span>
-              <span class="subtitle">Choose the input pipeline (page text vs URL extraction).</span>
-              <select id="requestMode">
-                <option value="">Default (auto)</option>
-                <option value="page">Page (use visible text)</option>
-                <option value="url">URL (force URL extraction)</option>
-              </select>
-            </label>
-            <label>
-              <span>Firecrawl</span>
-              <span class="subtitle">Firecrawl fetches + cleans pages to Markdown via its API. Off, auto fallback, or always use it.</span>
-              <select id="firecrawlMode">
-                <option value="">Default (auto)</option>
-                <option value="off">Off</option>
-                <option value="auto">Auto</option>
-                <option value="always">Always</option>
-              </select>
-            </label>
-            <label>
-              <span>Markdown mode</span>
-              <span class="subtitle">How HTML is converted to Markdown before summarizing.</span>
-              <select id="markdownMode">
-                <option value="">Default (readability)</option>
-                <option value="readability">Readability</option>
-                <option value="llm">LLM</option>
-                <option value="auto">Auto</option>
-                <option value="off">Off</option>
-              </select>
-            </label>
-            <label>
-              <span>Preprocess</span>
-              <span class="subtitle">For file inputs: convert to text/Markdown first (PDF/Doc/etc) to improve model compatibility.</span>
-              <select id="preprocessMode">
-                <option value="">Default (off)</option>
-                <option value="off">Off</option>
-                <option value="auto">Auto</option>
-                <option value="always">Always</option>
-              </select>
-            </label>
-            <label>
-              <span>YouTube mode</span>
-              <span class="subtitle">Auto picks best transcript; Web uses YouTube captions; yt-dlp extracts audio for transcription; Apify is fallback; No-auto skips auto captions.</span>
-              <select id="youtubeMode">
-                <option value="">Default (config)</option>
-                <option value="auto">Auto (best transcript)</option>
-                <option value="no-auto">No auto captions</option>
-                <option value="yt-dlp">yt-dlp</option>
-                <option value="web">Web</option>
-                <option value="apify">Apify</option>
-              </select>
-            </label>
-            <label>
-              <span>Timeout</span>
-              <span class="subtitle">Overall timeout for fetch + model (e.g. 90s, 2m).</span>
-              <input id="timeout" type="text" placeholder="2m" />
-            </label>
-            <label>
-              <span>Retries</span>
-              <span class="subtitle">LLM retry attempts on timeout (0–5).</span>
-              <input id="retries" type="number" min="0" max="5" step="1" />
-            </label>
-            <label>
-              <span>Max output tokens</span>
-              <span class="subtitle">Hard cap for model output (e.g. 2k).</span>
-              <input id="maxOutputTokens" type="text" placeholder="2k" />
-            </label>
+              <div class="combo span-2">
+                <div id="extendedLoggingToggle"></div>
+                <span class="subtitle">
+                  Include full input + output in daemon logs (large, only when daemon logging is enabled).
+                </span>
+              </div>
+              <label class="span-2">
+                <div class="labelRow">
+                  <span>Hover summary prompt</span>
+                  <button id="hoverPromptReset" type="button" class="miniButton">Reset</button>
+                </div>
+                <span class="subtitle">Prompt used for hover summaries in pages.</span>
+                <textarea id="hoverPrompt" rows="3"></textarea>
+              </label>
+              <label>
+                <span>Pipeline mode</span>
+                <span class="subtitle">Choose the input pipeline (page text vs URL extraction).</span>
+                <select id="requestMode">
+                  <option value="">Default (auto)</option>
+                  <option value="page">Page (use visible text)</option>
+                  <option value="url">URL (force URL extraction)</option>
+                </select>
+              </label>
+              <label>
+                <span>Firecrawl</span>
+                <span class="subtitle">Firecrawl fetches + cleans pages to Markdown via its API. Off, auto fallback, or always use it.</span>
+                <select id="firecrawlMode">
+                  <option value="">Default (auto)</option>
+                  <option value="off">Off</option>
+                  <option value="auto">Auto</option>
+                  <option value="always">Always</option>
+                </select>
+              </label>
+              <label>
+                <span>Markdown mode</span>
+                <span class="subtitle">How HTML is converted to Markdown before summarizing.</span>
+                <select id="markdownMode">
+                  <option value="">Default (readability)</option>
+                  <option value="readability">Readability</option>
+                  <option value="llm">LLM</option>
+                  <option value="auto">Auto</option>
+                  <option value="off">Off</option>
+                </select>
+              </label>
+              <label>
+                <span>Preprocess</span>
+                <span class="subtitle">For file inputs: convert to text/Markdown first (PDF/Doc/etc) to improve model compatibility.</span>
+                <select id="preprocessMode">
+                  <option value="">Default (off)</option>
+                  <option value="off">Off</option>
+                  <option value="auto">Auto</option>
+                  <option value="always">Always</option>
+                </select>
+              </label>
+              <label>
+                <span>YouTube mode</span>
+                <span class="subtitle">Auto picks best transcript; Web uses YouTube captions; yt-dlp extracts audio for transcription; Apify is fallback; No-auto skips auto captions.</span>
+                <select id="youtubeMode">
+                  <option value="">Default (config)</option>
+                  <option value="auto">Auto (best transcript)</option>
+                  <option value="no-auto">No auto captions</option>
+                  <option value="yt-dlp">yt-dlp</option>
+                  <option value="web">Web</option>
+                  <option value="apify">Apify</option>
+                </select>
+              </label>
+              <label>
+                <span>Timeout</span>
+                <span class="subtitle">Overall timeout for fetch + model (e.g. 90s, 2m).</span>
+                <input id="timeout" type="text" placeholder="2m" />
+              </label>
+              <label>
+                <span>Retries</span>
+                <span class="subtitle">LLM retry attempts on timeout (0–5).</span>
+                <input id="retries" type="number" min="0" max="5" step="1" />
+              </label>
+              <label>
+                <span>Max output tokens</span>
+                <span class="subtitle">Hard cap for model output (e.g. 2k).</span>
+                <input id="maxOutputTokens" type="text" placeholder="2k" />
+              </label>
+            </div>
           </div>
         </section>
 
