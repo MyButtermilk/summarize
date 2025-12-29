@@ -156,7 +156,7 @@ export function createDaemonUrlFlowContext(args: DaemonUrlFlowContextArgs): UrlF
   const retries = resolvedOverrides.retries ?? 1
   const firecrawlMode = resolvedOverrides.firecrawlMode ?? 'off'
   const markdownMode = resolvedOverrides.markdownMode ?? 'readability'
-  const preprocessMode = resolvedOverrides.preprocessMode ?? 'off'
+  const preprocessMode = resolvedOverrides.preprocessMode ?? 'auto'
   const youtubeMode = resolvedOverrides.youtubeMode ?? 'auto'
 
   const summaryEngine = createSummaryEngine({

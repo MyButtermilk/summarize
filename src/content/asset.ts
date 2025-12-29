@@ -72,6 +72,29 @@ function isHtmlMediaType(mediaType: string | null): boolean {
   return mediaType === 'text/html' || mediaType === 'application/xhtml+xml'
 }
 
+function isLikelyAssetMediaType(mediaType: string | null): boolean {
+  if (!mediaType) return false
+  if (isHtmlMediaType(mediaType)) return false
+  return true
+}
+
+function parseContentDispositionFilename(header: string | null): string | null {
+  if (!header) return null
+  const match =
+    /filename\*\s*=\s*([^;]+)/i.exec(header) ?? /filename\s*=\s*([^;]+)/i.exec(header)
+  if (!match?.[1]) return null
+  let value = match[1].trim()
+  if (value.toLowerCase().startsWith("utf-8''")) {
+    value = value.slice(7)
+  }
+  value = value.replace(/^"|"$/g, '')
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
 function looksLikeHtml(bytes: Uint8Array): boolean {
   const head = new TextDecoder().decode(bytes.slice(0, 256)).trimStart().toLowerCase()
   return head.startsWith('<!doctype html') || head.startsWith('<html') || head.startsWith('<head')
@@ -156,8 +179,47 @@ export async function classifyUrl({
     return { kind: 'asset' }
   }
 
-  void fetchImpl
-  void timeoutMs
+  const tryDetectFromHead = async (): Promise<boolean> => {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), timeoutMs)
+    try {
+      const res = await fetchImpl(url, { method: 'HEAD', signal: controller.signal })
+      if (!res.ok) return false
+      const mediaType = normalizeHeaderMediaType(res.headers.get('content-type'))
+      if (isLikelyAssetMediaType(mediaType)) return true
+      const filename = parseContentDispositionFilename(res.headers.get('content-disposition'))
+      if (filename && isLikelyAssetPathname(filename)) return true
+      return false
+    } catch {
+      return false
+    } finally {
+      clearTimeout(timeout)
+    }
+  }
+
+  const tryDetectFromRange = async (): Promise<boolean> => {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), timeoutMs)
+    try {
+      const res = await fetchImpl(url, {
+        method: 'GET',
+        headers: { Range: 'bytes=0-2047' },
+        signal: controller.signal,
+      })
+      if (!res.ok) return false
+      const mediaType = normalizeHeaderMediaType(res.headers.get('content-type'))
+      if (isLikelyAssetMediaType(mediaType)) return true
+      const buffer = new Uint8Array(await res.arrayBuffer())
+      return !looksLikeHtml(buffer)
+    } catch {
+      return false
+    } finally {
+      clearTimeout(timeout)
+    }
+  }
+
+  if (await tryDetectFromHead()) return { kind: 'asset' }
+  if (await tryDetectFromRange()) return { kind: 'asset' }
   return { kind: 'website' }
 }
 
