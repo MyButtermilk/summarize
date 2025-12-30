@@ -74,7 +74,8 @@ const advancedBtn = byId<HTMLButtonElement>('advanced')
 const autoToggleRoot = byId<HTMLDivElement>('autoToggle')
 const lengthRoot = byId<HTMLDivElement>('lengthRoot')
 const pickersRoot = byId<HTMLDivElement>('pickersRoot')
-const sizeEl = byId<HTMLInputElement>('size')
+const sizeSmBtn = byId<HTMLButtonElement>('sizeSm')
+const sizeLgBtn = byId<HTMLButtonElement>('sizeLg')
 const advancedSettingsEl = byId<HTMLDetailsElement>('advancedSettings')
 const modelPresetEl = byId<HTMLSelectElement>('modelPreset')
 const modelCustomEl = byId<HTMLInputElement>('modelCustom')
@@ -133,34 +134,6 @@ let lastAction: 'summarize' | 'chat' | null = null
 let inputMode: 'page' | 'video' = 'page'
 let inputModeOverride: 'page' | 'video' | null = null
 let mediaAvailable = false
-const inputModeByHost = new Map<string, 'page' | 'video'>()
-
-const mediaPreferredHosts = new Set([
-  'youtube.com',
-  'music.youtube.com',
-  'youtu.be',
-  'open.spotify.com',
-  'podcasts.apple.com',
-  'overcast.fm',
-  'pca.st',
-])
-
-function getHost(url: string | null | undefined): string | null {
-  if (!url) return null
-  try {
-    return new URL(url).hostname
-  } catch {
-    return null
-  }
-}
-
-function shouldPreferMedia(url: string | null | undefined): boolean {
-  const host = getHost(url)
-  if (!host) return false
-  if (mediaPreferredHosts.has(host)) return true
-  if (host.endsWith('.youtube.com')) return true
-  return false
-}
 
 const chatController = new ChatController({
   messagesEl: chatMessagesEl,
@@ -645,6 +618,24 @@ function applyTypography(fontFamily: string, fontSize: number) {
   document.documentElement.style.setProperty('--font-size', `${fontSize}px`)
 }
 
+const MIN_FONT_SIZE = 12
+const MAX_FONT_SIZE = 20
+let currentFontSize = defaultSettings.fontSize
+
+function clampFontSize(value: number) {
+  return Math.min(MAX_FONT_SIZE, Math.max(MIN_FONT_SIZE, Math.round(value)))
+}
+
+function updateSizeControls() {
+  sizeSmBtn.disabled = currentFontSize <= MIN_FONT_SIZE
+  sizeLgBtn.disabled = currentFontSize >= MAX_FONT_SIZE
+}
+
+function setCurrentFontSize(value: number) {
+  currentFontSize = clampFontSize(value)
+  updateSizeControls()
+}
+
 let pickerSettings = {
   scheme: defaultSettings.colorScheme,
   mode: defaultSettings.colorMode,
@@ -672,6 +663,7 @@ const pickerHandlers = {
       const next = await patchSettings({ fontFamily: value })
       pickerSettings = { ...pickerSettings, fontFamily: next.fontFamily }
       applyTypography(next.fontFamily, next.fontSize)
+      setCurrentFontSize(next.fontSize)
     })()
   },
   onLengthChange: (value) => {
@@ -1408,17 +1400,14 @@ function updateControls(state: UiState) {
     !tabChanged && nextTabUrl && activeTabUrl && !urlsMatch(nextTabUrl, activeTabUrl)
   const nextMediaAvailable = Boolean(state.media && (state.media.hasVideo || state.media.hasAudio))
   const nextVideoLabel = state.media?.hasAudio && !state.media.hasVideo ? 'Audio' : 'Video'
-  const host = getHost(nextTabUrl)
-  const savedMode = host ? inputModeByHost.get(host) ?? null : null
-  const preferMedia = nextMediaAvailable && shouldPreferMedia(nextTabUrl)
 
   if (tabChanged || urlChanged) {
     const previousTabId = activeTabId
     activeTabId = nextTabId
     activeTabUrl = nextTabUrl
     resetChatState()
-    inputMode = savedMode ?? (preferMedia ? 'video' : 'page')
-    inputModeOverride = nextMediaAvailable ? inputMode : null
+    inputMode = 'page'
+    inputModeOverride = null
     if (!tabChanged && urlChanged) {
       void clearChatHistoryForTab(previousTabId)
     }
@@ -1471,9 +1460,6 @@ function updateControls(state: UiState) {
   if (!nextMediaAvailable) {
     inputMode = 'page'
     inputModeOverride = null
-  } else if (!mediaAvailable && nextMediaAvailable) {
-    inputMode = savedMode ?? (preferMedia ? 'video' : inputMode)
-    inputModeOverride = inputMode
   }
   mediaAvailable = nextMediaAvailable
   summarizeControl.update({
@@ -1485,8 +1471,6 @@ function updateControls(state: UiState) {
     onValueChange: (value) => {
       inputMode = value
       inputModeOverride = value
-      const host = getHost(activeTabUrl)
-      if (host) inputModeByHost.set(host, value)
       if (autoValue) {
         sendSummarize({ refresh: true })
       }
@@ -1795,12 +1779,17 @@ chatInputEl.addEventListener('input', () => {
   chatInputEl.style.height = `${Math.min(chatInputEl.scrollHeight, 120)}px`
 })
 
-sizeEl.addEventListener('input', () => {
+const bumpFontSize = (delta: number) => {
   void (async () => {
-    const next = await patchSettings({ fontSize: Number(sizeEl.value) })
+    const nextSize = clampFontSize(currentFontSize + delta)
+    const next = await patchSettings({ fontSize: nextSize })
     applyTypography(next.fontFamily, next.fontSize)
+    setCurrentFontSize(next.fontSize)
   })()
-})
+}
+
+sizeSmBtn.addEventListener('click', () => bumpFontSize(-1))
+sizeLgBtn.addEventListener('click', () => bumpFontSize(1))
 
 modelPresetEl.addEventListener('change', () => {
   modelCustomEl.hidden = modelPresetEl.value !== 'custom'
@@ -1838,7 +1827,7 @@ modelRefreshBtn.addEventListener('click', () => {
 
 void (async () => {
   const s = await loadSettings()
-  sizeEl.value = String(s.fontSize)
+  setCurrentFontSize(s.fontSize)
   autoValue = s.autoSummarize
   chatEnabledValue = s.chatEnabled
   autoToggle.update({

@@ -20,6 +20,8 @@
 - Chrome Side Panel: status text now says “Connecting…” during daemon handshake.
 - Chrome Side Panel: show page word count and video duration in the summarize source dropdown.
 - Chrome Side Panel: prefer media on video/podcast sites and show selected source on the summarize button.
+- Chrome Side Panel: replace font size slider with A/AA toggle and label San Francisco explicitly.
+- Chrome Side Panel: Summarize button becomes a dropdown when media is detected (Page vs Video/Audio).
 - Hover summaries: prompt customization and tighter prompts for cleaner tooltips.
 - Daemon: expose version in health, plus a status pill in the Side Panel header.
 - Daemon CLI: retry health/auth checks on restart/install to avoid false negatives during startup (waits up to ~30s).

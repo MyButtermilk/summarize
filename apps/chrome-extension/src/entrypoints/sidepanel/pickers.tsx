@@ -58,7 +58,7 @@ const formatCount = (value: number) => value.toLocaleString()
 
 const formatWordCount = (value: number | null | undefined) => {
   if (!value || !Number.isFinite(value)) return null
-  return `${formatCount(value)}w`
+  return `${formatCount(value)} words`
 }
 
 const formatDuration = (seconds: number | null | undefined) => {
@@ -111,7 +111,7 @@ const modeItems: SelectItem[] = [
 const fontItems: SelectItem[] = [
   {
     value: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif',
-    label: 'SF',
+    label: 'San Francisco',
   },
   { value: 'Georgia, serif', label: 'Georgia' },
   { value: 'Iowan Old Style, Palatino, serif', label: 'Iowan' },
@@ -411,7 +411,9 @@ function SidepanelPickers(props: SidepanelPickerProps) {
         api={fontApi}
         items={fontItems}
         triggerContent={(label, value) => (
-          <span style={value ? { fontFamily: value } : undefined}>{label || 'SF'}</span>
+          <span style={value ? { fontFamily: value } : undefined}>
+            {label || 'San Francisco'}
+          </span>
         )}
         optionContent={(item) => <span style={{ fontFamily: item.value }}>{item.label}</span>}
       />
@@ -469,8 +471,7 @@ function SummarizeControl(props: SummarizeControlProps) {
   })
 
   const selectedValue = api.value[0] ?? ''
-  const selectedLabel =
-    selectedValue === 'video' ? props.videoLabel ?? 'Video' : 'Page'
+  const selectedLabel = selectedValue === 'video' ? props.videoLabel ?? 'Video' : 'Page'
 
   const positionerProps = api.getPositionerProps()
   const positionerStyle = {
@@ -548,7 +549,7 @@ function SummarizeControl(props: SummarizeControlProps) {
         onPointerDown={onPointerDown}
         onKeyDown={onKeyDown}
       >
-        Summarize · {selectedLabel}
+        {selectedLabel}
       </button>
       {portalRoot ? createPortal(content, portalRoot) : content}
       <select className="pickerHidden" {...api.getHiddenSelectProps()} />

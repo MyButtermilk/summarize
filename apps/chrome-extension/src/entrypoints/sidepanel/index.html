@@ -31,10 +31,18 @@
       <div class="drawerGrid">
         <div id="pickersRoot"></div>
         <div id="lengthRoot"></div>
-        <label class="size">
+        <div class="size">
           <span>Size</span>
-          <input id="size" type="range" min="12" max="20" step="1" />
-        </label>
+          <div class="sizeControl" role="group" aria-label="Text size">
+            <button id="sizeSm" type="button" class="ghost sizeBtn" aria-label="Smaller text">
+              A
+            </button>
+            <span class="sizeDivider" aria-hidden="true"></span>
+            <button id="sizeLg" type="button" class="ghost sizeBtn sizeBtnLg" aria-label="Larger text">
+              A
+            </button>
+          </div>
+        </div>
       </div>
 
       <details id="advancedSettings" class="drawerAdvanced">

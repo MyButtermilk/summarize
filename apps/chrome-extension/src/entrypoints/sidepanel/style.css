@@ -538,7 +538,7 @@ header {
   position: absolute;
   right: 12px;
   top: 50%;
-  transform: translateY(calc(-50% - 2px)) rotate(45deg);
+  transform: translateY(calc(-50% - 1px)) rotate(45deg);
   pointer-events: none;
 }
 
@@ -649,6 +649,49 @@ button.ghost:hover {
 
 .drawer label:has(.picker[data-state="open"]) {
   z-index: 8;
+}
+
+.drawer .size {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.sizeControl {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--field-bg);
+  overflow: hidden;
+}
+
+.sizeBtn {
+  border: 0;
+  background: transparent;
+  padding: 6px 10px;
+  min-width: 30px;
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sizeBtnLg {
+  font-size: 14px;
+}
+
+.sizeBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.sizeDivider {
+  width: 1px;
+  align-self: stretch;
+  background: color-mix(in srgb, var(--border) 70%, transparent);
 }
 
 .drawer .toggleRow {
@@ -973,7 +1016,7 @@ select {
 }
 
 .pickerPositioner[data-picker="source"] .pickerContent {
-  min-width: min(180px, 100%);
+  min-width: min(220px, 100%);
 }
 
 .pickerPositioner[data-picker="length"] {
@@ -982,7 +1025,7 @@ select {
 }
 
 .pickerPositioner[data-picker="source"] {
-  width: min(max(180px, calc(var(--reference-width, 0px) + 6px)), var(--available-width, 100vw));
+  width: min(max(220px, calc(var(--reference-width, 0px) + 12px)), var(--available-width, 100vw));
   max-width: var(--available-width, 100vw);
 }
 
