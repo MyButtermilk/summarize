@@ -18,6 +18,7 @@
 - Chrome Side Panel: length preset tooltips now show target ranges + paragraph guidance (aligned with core prompt constraints).
 - Chrome Side Panel: add refresh summary control and bypass cache for explicit refreshes.
 - Chrome Side Panel: status text now says “Connecting…” during daemon handshake.
+- Chrome Side Panel: show page word count and video duration in the summarize source dropdown.
 - Hover summaries: prompt customization and tighter prompts for cleaner tooltips.
 - Daemon: expose version in health, plus a status pill in the Side Panel header.
 - Daemon CLI: retry health/auth checks on restart/install to avoid false negatives during startup (waits up to ~30s).
@@ -35,9 +36,15 @@
 - Chrome Side Panel: show a retryable error state when the daemon stream fails or stalls instead of silently hanging.
 - Chrome Side Panel: avoid startup crash when a run is aborted while a request is in flight.
 - Chrome Side Panel chat: when a video page was previously summarized from page text, chat now re-extracts via the daemon so duration + transcription metadata are included.
+- Chrome Side Panel: align summarize dropdown caret with label.
+- Install: use npm releases for osc-progress/tokentally instead of git deps.
 - YouTube transcripts: propagate duration into transcript metadata so chat can answer “how long is this video?” reliably.
 - Chrome Side Panel chat: tighten bottom padding so the input dock doesn't leave excess gap.
 - YouTube transcripts: fall back to the YouTube player API for duration when the watch HTML omits it.
+
+### Dev
+
+- Ignore packed `.tgz`/`.zip` artifacts in git.
 - YouTube transcripts: fall back to yt-dlp metadata for duration when API and HTML data are missing.
 - Chrome Side Panel chat: fall back to content-script video duration when URL extraction has no duration metadata.
 - Tests: cover extension duration parsing and precedence.
