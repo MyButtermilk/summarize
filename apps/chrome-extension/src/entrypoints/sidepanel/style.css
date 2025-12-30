@@ -1508,6 +1508,57 @@ button.setup__pill.isActive {
   border-color: color-mix(in srgb, var(--border) 80%, transparent);
 }
 
+.chatQueue {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.chatQueue.isHidden {
+  display: none;
+}
+
+.chatQueueItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+}
+
+.chatQueueText {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chatQueueRemove {
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.chatQueueRemove:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--border) 85%, transparent);
+}
+
 .chatInputRow {
   display: flex;
   gap: 8px;
