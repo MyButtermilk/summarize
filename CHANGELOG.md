@@ -27,6 +27,7 @@
 - Chrome Side Panel: add mode icons to the mode picker.
 - Chrome Side Panel: align size control to match pickers and add line-height controls.
 - Chrome Side Panel: align size and line-height controls with length picker height.
+- Chrome Side Panel: refine line-height control icons.
 - Chrome Side Panel: Summarize button becomes a dropdown when media is detected (Page vs Video/Audio).
 - Hover summaries: prompt customization and tighter prompts for cleaner tooltips.
 - Daemon: expose version in health, plus a status pill in the Side Panel header.

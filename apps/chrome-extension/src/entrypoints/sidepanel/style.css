@@ -731,6 +731,7 @@ button.ghost:hover {
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  color: var(--muted);
 }
 
 .lineHeightBtn:disabled {
@@ -739,25 +740,23 @@ button.ghost:hover {
 }
 
 .lineIcon {
-  width: 14px;
+  width: 16px;
   height: 12px;
-  border-radius: 2px;
-  background-repeat: no-repeat;
-  opacity: 0.7;
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.8;
 }
 
 .lineIconTight {
-  background:
-    linear-gradient(var(--muted), var(--muted)) 0 2px/14px 1px,
-    linear-gradient(var(--muted), var(--muted)) 0 5px/14px 1px,
-    linear-gradient(var(--muted), var(--muted)) 0 8px/14px 1px;
+  transform: translateY(0.5px);
 }
 
 .lineIconLoose {
-  background:
-    linear-gradient(var(--muted), var(--muted)) 0 1px/14px 1px,
-    linear-gradient(var(--muted), var(--muted)) 0 6px/14px 1px,
-    linear-gradient(var(--muted), var(--muted)) 0 11px/14px 1px;
+  transform: translateY(-0.5px);
 }
 
 .drawer .toggleRow {
