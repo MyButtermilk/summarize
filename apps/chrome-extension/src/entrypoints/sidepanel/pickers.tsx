@@ -69,7 +69,7 @@ const formatDuration = (seconds: number | null | undefined) => {
   const secs = total % 60
   const mm = minutes.toString().padStart(2, '0')
   const ss = secs.toString().padStart(2, '0')
-  return hours > 0 ? `${hours}:${mm}:${ss}` : `${minutes}:${ss}`
+  return hours > 0 ? `${hours}:${mm}:${ss} min` : `${minutes}:${ss} min`
 }
 
 const formatLengthTooltip = (preset: SummaryLength): string => {
