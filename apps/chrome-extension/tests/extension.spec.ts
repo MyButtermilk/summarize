@@ -388,11 +388,12 @@ test('sidepanel refresh free models from advanced settings', async () => {
       type: 'ui:state',
       state: buildUiState({
         status: '',
-        settings: { tokenPresent: true, autoSummarize: false, model: 'auto', length: 'xl' },
+        settings: { tokenPresent: true, autoSummarize: false, model: 'free', length: 'xl' },
       }),
     })
 
     await page.locator('#advancedSettings summary').click()
+    await expect(page.locator('#modelRefresh')).toBeVisible()
     await page.locator('#modelRefresh').click()
     await expect(page.locator('#modelStatus')).toContainText('Free models updated.')
     await expect.poll(() => modelCalls).toBeGreaterThanOrEqual(2)
@@ -448,11 +449,12 @@ test('sidepanel refresh free shows error on failure', async () => {
       type: 'ui:state',
       state: buildUiState({
         status: '',
-        settings: { tokenPresent: true, autoSummarize: false, model: 'auto', length: 'xl' },
+        settings: { tokenPresent: true, autoSummarize: false, model: 'free', length: 'xl' },
       }),
     })
 
     await page.locator('#advancedSettings summary').click()
+    await expect(page.locator('#modelRefresh')).toBeVisible()
     await page.locator('#modelRefresh').click()
     await expect(page.locator('#modelStatus')).toContainText('Refresh free failed')
     await expect(page.locator('#modelStatus')).toHaveAttribute('data-state', 'error')
