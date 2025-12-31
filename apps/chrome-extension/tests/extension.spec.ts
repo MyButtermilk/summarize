@@ -132,6 +132,17 @@ async function getBackground(harness: ExtensionHarness): Promise<Worker> {
 async function sendBgMessage(harness: ExtensionHarness, message: object) {
   const background = await getBackground(harness)
   await background.evaluate((payload) => {
+    const global = globalThis as typeof globalThis & {
+      __summarizePanelPorts?: Map<number, { postMessage: (msg: object) => void }>
+    }
+    const ports = global.__summarizePanelPorts
+    if (ports && ports.size > 0) {
+      const first = ports.values().next().value
+      if (first?.postMessage) {
+        first.postMessage(payload)
+        return
+      }
+    }
     chrome.runtime.sendMessage(payload)
   }, message)
 }
@@ -139,15 +150,17 @@ async function sendBgMessage(harness: ExtensionHarness, message: object) {
 async function sendPanelMessage(page: Page, message: object) {
   await page.waitForFunction(
     () =>
-      typeof (window as { __summarizePanelPort?: { postMessage?: unknown } })
-        .__summarizePanelPort?.postMessage === 'function',
+      typeof (window as { __summarizePanelPort?: { postMessage?: unknown } }).__summarizePanelPort
+        ?.postMessage === 'function',
     null,
     { timeout: 5_000 }
   )
   await page.evaluate((payload) => {
-    const port = (window as {
-      __summarizePanelPort?: { postMessage: (payload: object) => void }
-    }).__summarizePanelPort
+    const port = (
+      window as {
+        __summarizePanelPort?: { postMessage: (payload: object) => void }
+      }
+    ).__summarizePanelPort
     if (!port) throw new Error('Missing panel port')
     port.postMessage(payload)
   }, message)

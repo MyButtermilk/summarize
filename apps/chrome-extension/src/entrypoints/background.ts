@@ -147,7 +147,9 @@ function canSummarizeUrl(url: string | undefined): url is string {
 
 async function getActiveTab(windowId?: number): Promise<chrome.tabs.Tab | null> {
   const [tab] = await chrome.tabs.query(
-    typeof windowId === 'number' ? { active: true, windowId } : { active: true, currentWindow: true }
+    typeof windowId === 'number'
+      ? { active: true, windowId }
+      : { active: true, currentWindow: true }
   )
   return tab ?? null
 }
@@ -322,25 +324,35 @@ export default defineBackground(() => {
 
   const getPanelSession = (windowId: number) => panelSessions.get(windowId) ?? null
 
+  const getPanelPortMap = () => {
+    const global = globalThis as typeof globalThis & {
+      __summarizePanelPorts?: Map<number, chrome.runtime.Port>
+    }
+    if (!global.__summarizePanelPorts) {
+      global.__summarizePanelPorts = new Map()
+    }
+    return global.__summarizePanelPorts
+  }
+
   const registerPanelSession = (windowId: number, port: chrome.runtime.Port) => {
     const existing = panelSessions.get(windowId)
     if (existing && existing.port !== port) {
       existing.runController?.abort()
     }
-    const session: PanelSession =
-      existing ?? {
-        windowId,
-        port,
-        panelOpen: false,
-        panelLastPingAt: 0,
-        lastSummarizedUrl: null,
-        inflightUrl: null,
-        runController: null,
-        lastNavAt: 0,
-        daemonRecovery: createDaemonRecovery(),
-      }
+    const session: PanelSession = existing ?? {
+      windowId,
+      port,
+      panelOpen: false,
+      panelLastPingAt: 0,
+      lastSummarizedUrl: null,
+      inflightUrl: null,
+      runController: null,
+      lastNavAt: 0,
+      daemonRecovery: createDaemonRecovery(),
+    }
     session.port = port
     panelSessions.set(windowId, session)
+    getPanelPortMap().set(windowId, port)
     return session
   }
 
@@ -586,9 +598,9 @@ export default defineBackground(() => {
       url,
       title,
     }: {
-    tabId: number
-    url: string
-    title: string | null
+      tabId: number
+      url: string
+      title: string | null
     }
   ) => {
     const lastProbeUrl = lastMediaProbeByTab.get(tabId)
@@ -692,8 +704,7 @@ export default defineBackground(() => {
 
     if (
       settings.autoSummarize &&
-      ((session.lastSummarizedUrl &&
-        urlsMatch(session.lastSummarizedUrl, resolvedExtracted.url)) ||
+      ((session.lastSummarizedUrl && urlsMatch(session.lastSummarizedUrl, resolvedExtracted.url)) ||
         (session.inflightUrl && urlsMatch(session.inflightUrl, resolvedExtracted.url))) &&
       !isManual
     ) {
@@ -1104,6 +1115,7 @@ export default defineBackground(() => {
       session.inflightUrl = null
       session.daemonRecovery.clearPending()
       panelSessions.delete(windowId)
+      getPanelPortMap().delete(windowId)
       void clearCachedExtractsForWindow(windowId)
     })
   })
