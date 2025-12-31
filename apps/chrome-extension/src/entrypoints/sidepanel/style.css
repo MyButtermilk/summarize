@@ -881,7 +881,7 @@ button.ghost:hover {
 }
 
 details.drawerAdvanced:not([open]) > .drawerAdvancedBody {
-  display: grid !important;
+  display: grid;
 }
 
 .drawerAdvancedBody {
