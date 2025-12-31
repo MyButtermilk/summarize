@@ -1,6 +1,7 @@
 import { Readability } from '@mozilla/readability'
 import { defineContentScript } from 'wxt/utils/define-content-script'
 import { resolveMediaDurationSecondsFromData } from '../lib/media-duration'
+import { type SeekResponse, seekToSecondsInDocument } from '../lib/seek'
 
 type ExtractRequest = { type: 'extract'; maxChars: number }
 type SeekRequest = { type: 'seek'; seconds: number }
@@ -19,7 +20,6 @@ type ExtractResponse =
       }
     }
   | { ok: false; error: string }
-type SeekResponse = { ok: true } | { ok: false; error: string }
 
 function clampText(text: string, maxChars: number): { text: string; truncated: boolean } {
   if (text.length <= maxChars) return { text, truncated: false }
@@ -138,47 +138,7 @@ function extract(maxChars: number): ExtractResponse {
 }
 
 function seekToSeconds(seconds: number): SeekResponse {
-  if (!Number.isFinite(seconds) || seconds < 0) {
-    return { ok: false, error: 'Invalid timestamp' }
-  }
-  const media = document.querySelector('video, audio') as HTMLMediaElement | null
-  if (media) {
-    const wasPaused = media.paused
-    try {
-      media.currentTime = seconds
-      if (!wasPaused) {
-        void media.play().catch(() => {})
-      }
-      return { ok: true }
-    } catch (error) {
-      return { ok: false, error: error instanceof Error ? error.message : 'Seek failed' }
-    }
-  }
-
-  const player = document.getElementById('movie_player') as
-    | ((HTMLElement & { seekTo?: (time: number, allowSeekAhead?: boolean) => void }) & {
-        getPlayerState?: () => number
-        pauseVideo?: () => void
-        playVideo?: () => void
-      })
-    | null
-  if (player?.seekTo) {
-    const state = typeof player.getPlayerState === 'function' ? player.getPlayerState() : null
-    try {
-      player.seekTo(seconds, true)
-      if (state === 2 && typeof player.pauseVideo === 'function') {
-        player.pauseVideo()
-      }
-      if (state === 1 && typeof player.playVideo === 'function') {
-        player.playVideo()
-      }
-      return { ok: true }
-    } catch (error) {
-      return { ok: false, error: error instanceof Error ? error.message : 'Seek failed' }
-    }
-  }
-
-  return { ok: false, error: 'No media element found' }
+  return seekToSecondsInDocument(document, seconds)
 }
 
 export default defineContentScript({
