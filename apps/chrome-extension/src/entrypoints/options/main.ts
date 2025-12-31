@@ -465,7 +465,7 @@ async function requestAutomationPermissions() {
   if (!chrome.permissions) return
   try {
     await chrome.permissions.request({
-      permissions: ['userScripts', 'debugger'],
+      permissions: ['userScripts'],
     })
   } catch {
     // ignore

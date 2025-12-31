@@ -57,8 +57,9 @@ export default defineConfig({
       'webNavigation',
       'scripting',
       'windows',
+      'debugger',
     ],
-    optional_permissions: ['userScripts', 'debugger'],
+    optional_permissions: ['userScripts'],
     host_permissions: ['<all_urls>', 'http://127.0.0.1:8787/*'],
     background: {
       type: 'module',
