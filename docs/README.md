@@ -22,4 +22,4 @@ summary: "Docs index for summarize behaviors and modes."
 
 ## Website
 
-- Static site source: `docs/site/` (GitHub Pages via Actions)
+- Jekyll site source: `docs/` (Markdown → HTML via GitHub Pages Actions)
