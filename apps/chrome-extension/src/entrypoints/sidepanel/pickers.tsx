@@ -128,7 +128,12 @@ const modeIcons: Record<string, JSX.Element> = {
   light: (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <circle cx="12" cy="12" r="4.2" fill="none" stroke="currentColor" strokeWidth="1.5" />
-      <path d="M12 3.5v2.5M12 18v2.5M3.5 12h2.5M18 12h2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <path
+        d="M12 3.5v2.5M12 18v2.5M3.5 12h2.5M18 12h2.5"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
     </svg>
   ),
   dark: (

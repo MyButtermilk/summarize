@@ -1041,7 +1041,7 @@ async function runRefreshFree() {
         if (text) {
           if (!winnerModel) {
             const match = text.match(/^-\\s+([^\\s]+)/)
-            if (match && match[1]) winnerModel = match[1]
+            if (match?.[1]) winnerModel = match[1]
           }
           setModelStatus(text, 'running')
         }

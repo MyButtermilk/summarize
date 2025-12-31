@@ -1323,9 +1323,24 @@ test('sidepanel auto summarize toggle stays inline', async () => {
   const harness = await launchExtension()
 
   try {
+    await seedSettings(harness, { token: 'test-token' })
+    await harness.context.route('http://127.0.0.1:8787/v1/models', async (route) => {
+      await route.fulfill({
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          ok: true,
+          options: [],
+          providers: {},
+          localModelsSource: null,
+        }),
+      })
+    })
     const page = await openExtensionPage(harness, 'sidepanel.html', '#title')
     await page.click('#drawerToggle')
     await expect(page.locator('#drawer')).toBeVisible()
+    await page.click('#advancedSettings > summary')
+    await expect(page.locator('#advancedSettings')).toHaveJSProperty('open', true)
 
     const label = page.locator('#autoToggle .checkboxRoot')
     await expect(label).toBeVisible()
