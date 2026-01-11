@@ -159,7 +159,8 @@ describe('daemon/agent', () => {
 
     const context = mockCompleteSimple.mock.calls[0]?.[1] as { tools?: Tool[] }
     const navigate = context.tools?.find((tool) => tool.name === 'navigate')
-    const properties = (navigate?.parameters as { properties?: Record<string, unknown> })?.properties
+    const properties = (navigate?.parameters as { properties?: Record<string, unknown> })
+      ?.properties
     expect(properties && 'listTabs' in properties).toBe(true)
     expect(properties && 'switchToTab' in properties).toBe(true)
   })

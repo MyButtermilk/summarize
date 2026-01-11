@@ -2,11 +2,6 @@ import type { AssistantMessage, Message } from '@mariozechner/pi-ai'
 import { shouldPreferUrlMode } from '@steipete/summarize-core/content/url'
 import { defineBackground } from 'wxt/utils/define-background'
 import { parseSseEvent } from '../../../../src/shared/sse-events.js'
-import { buildChatPageContent } from '../lib/chat-context'
-import { buildDaemonRequestBody, buildSummarizeRequestBody } from '../lib/daemon-payload'
-import { createDaemonRecovery, isDaemonUnreachableError } from '../lib/daemon-recovery'
-import { loadSettings, patchSettings } from '../lib/settings'
-import { parseSseStream } from '../lib/sse'
 import {
   deleteArtifact,
   getArtifactRecord,
@@ -14,6 +9,11 @@ import {
   parseArtifact,
   upsertArtifact,
 } from '../automation/artifacts-store'
+import { buildChatPageContent } from '../lib/chat-context'
+import { buildDaemonRequestBody, buildSummarizeRequestBody } from '../lib/daemon-payload'
+import { createDaemonRecovery, isDaemonUnreachableError } from '../lib/daemon-recovery'
+import { loadSettings, patchSettings } from '../lib/settings'
+import { parseSseStream } from '../lib/sse'
 
 type PanelToBg =
   | { type: 'panel:ready' }
@@ -174,6 +174,7 @@ function canSummarizeUrl(url: string | undefined): url is string {
   if (!url) return false
   if (url.startsWith('chrome://')) return false
   if (url.startsWith('chrome-extension://')) return false
+  if (url.startsWith('moz-extension://')) return false // Firefox extension pages
   if (url.startsWith('edge://')) return false
   if (url.startsWith('about:')) return false
   return true
@@ -1380,7 +1381,11 @@ export default defineBackground(() => {
   })
 
   chrome.runtime.onMessage.addListener(
-    (raw: HoverToBg | NativeInputRequest | ArtifactsRequest, sender, sendResponse): boolean | undefined => {
+    (
+      raw: HoverToBg | NativeInputRequest | ArtifactsRequest,
+      sender,
+      sendResponse
+    ): boolean | undefined => {
       if (!raw || typeof raw !== 'object' || typeof (raw as { type?: unknown }).type !== 'string') {
         return
       }
@@ -1580,5 +1585,20 @@ export default defineBackground(() => {
     }
   })
 
-  void chrome.sidePanel?.setPanelBehavior?.({ openPanelOnActionClick: true })
+  // Chrome: Auto-open side panel on toolbar icon click
+  if (import.meta.env.BROWSER === 'chrome') {
+    void chrome.sidePanel?.setPanelBehavior?.({ openPanelOnActionClick: true })
+  }
+
+  // Firefox: Toggle sidebar on toolbar icon click
+  // Firefox supports sidebarAction.toggle() for programmatic control
+  if (import.meta.env.BROWSER === 'firefox') {
+    chrome.action.onClicked.addListener(async () => {
+      // @ts-expect-error - sidebarAction API exists in Firefox but not in Chrome types
+      if (typeof browser?.sidebarAction?.toggle === 'function') {
+        // @ts-expect-error - Firefox-specific API
+        await browser.sidebarAction.toggle()
+      }
+    })
+  }
 })
