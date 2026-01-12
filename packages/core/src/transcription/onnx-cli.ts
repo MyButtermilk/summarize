@@ -2,24 +2,26 @@ import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { createWriteStream, promises as fs } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { extname, join } from 'node:path'
+import { basename, extname, join } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
-import {
-  isFfmpegAvailable,
-  runFfmpegTranscodeToWav,
-} from './whisper/ffmpeg.js'
+import { isFfmpegAvailable, runFfmpegTranscodeToWav } from './whisper/ffmpeg.js'
 import type { WhisperProgressEvent, WhisperTranscriptionResult } from './whisper/types.js'
 import { wrapError } from './whisper/utils.js'
 
 export type OnnxModelId = 'parakeet' | 'canary'
+
+type Env = Record<string, string | undefined>
 
 const COMMAND_ENV_VAR: Record<OnnxModelId, string> = {
   parakeet: 'SUMMARIZE_ONNX_PARAKEET_CMD',
   canary: 'SUMMARIZE_ONNX_CANARY_CMD',
 }
 
-const MODEL_SOURCES: Record<OnnxModelId, { repo: string; files: { name: string; path: string }[] }> = {
+const MODEL_SOURCES: Record<
+  OnnxModelId,
+  { repo: string; files: { name: string; path: string }[] }
+> = {
   parakeet: {
     repo: 'istupakov/parakeet-tdt-0.6b-v3-onnx',
     files: [
@@ -40,17 +42,111 @@ export function resolveOnnxProviderId(model: OnnxModelId): WhisperTranscriptionR
   return model === 'parakeet' ? 'onnx-parakeet' : 'onnx-canary'
 }
 
-export function resolveOnnxCommand(model: OnnxModelId): string | null {
-  const raw = process.env[COMMAND_ENV_VAR[model]]?.trim()
+export function resolveOnnxCommand(model: OnnxModelId, env: Env = process.env): string | null {
+  const raw = env[COMMAND_ENV_VAR[model]]?.trim()
   return raw && raw.length > 0 ? raw : null
 }
 
 type ModelArtifacts = { modelDir: string; modelPath: string; vocabPath: string }
 
-function resolveCacheDir() {
-  const override = process.env.SUMMARIZE_ONNX_CACHE_DIR?.trim()
+type CommandTemplate =
+  | { kind: 'argv'; argvTemplate: string[] }
+  | { kind: 'shell'; commandTemplate: string }
+
+function parseCommandTemplate(raw: string): CommandTemplate {
+  const trimmed = raw.trim()
+  if (trimmed.startsWith('[')) {
+    try {
+      const parsed: unknown = JSON.parse(trimmed)
+      if (
+        Array.isArray(parsed) &&
+        parsed.length > 0 &&
+        parsed.every((v) => typeof v === 'string' && v.trim().length > 0)
+      ) {
+        return { kind: 'argv', argvTemplate: parsed as string[] }
+      }
+    } catch {
+      // fall through to shell mode
+    }
+  }
+  return { kind: 'shell', commandTemplate: trimmed }
+}
+
+function shellEscape(value: string): string {
+  if (process.platform === 'win32') {
+    // Best-effort: quote for cmd.exe-ish shells.
+    return `"${value.replaceAll('"', '""')}"`
+  }
+  // POSIX shell-safe single-quote escaping.
+  return `'${value.replaceAll("'", `'\\''`)}'`
+}
+
+function buildArgvCommand({
+  argvTemplate,
+  inputPath,
+  artifacts,
+}: {
+  argvTemplate: string[]
+  inputPath: string
+  artifacts: ModelArtifacts
+}): { command: string; args: string[] } {
+  const inputPlaceholderPresent = argvTemplate.some((arg) => arg.includes('{input}'))
+  const replacements: Record<string, string> = {
+    '{input}': inputPath,
+    '{model_dir}': artifacts.modelDir,
+    '{model}': artifacts.modelPath,
+    '{vocab}': artifacts.vocabPath,
+  }
+
+  const argv = argvTemplate.map((arg) => {
+    let next = arg
+    for (const [needle, replacement] of Object.entries(replacements)) {
+      if (next.includes(needle)) next = next.replaceAll(needle, replacement)
+    }
+    return next
+  })
+
+  if (!inputPlaceholderPresent) argv.push(inputPath)
+
+  const [command, ...args] = argv
+  return { command, args }
+}
+
+function buildShellCommand({
+  commandTemplate,
+  inputPath,
+  artifacts,
+}: {
+  commandTemplate: string
+  inputPath: string
+  artifacts: ModelArtifacts
+}): string {
+  const inputPlaceholderPresent = commandTemplate.includes('{input}')
+  const replacements: Record<string, string> = {
+    '{input}': shellEscape(inputPath),
+    '{model_dir}': shellEscape(artifacts.modelDir),
+    '{model}': shellEscape(artifacts.modelPath),
+    '{vocab}': shellEscape(artifacts.vocabPath),
+  }
+
+  let command = commandTemplate
+  for (const [needle, replacement] of Object.entries(replacements)) {
+    if (command.includes(needle)) {
+      command = command.replaceAll(needle, replacement)
+    }
+  }
+
+  if (!inputPlaceholderPresent) {
+    command = `${command} ${shellEscape(inputPath)}`
+  }
+
+  return command
+}
+
+function resolveCacheDir(env: Env) {
+  const override = env.SUMMARIZE_ONNX_CACHE_DIR?.trim()
   if (override) return override
-  const base = process.env.XDG_CACHE_HOME?.trim() || join(homedir(), '.cache')
+  const base = env.XDG_CACHE_HOME?.trim() || join(homedir(), '.cache')
   return join(base, 'summarize', 'onnx')
 }
 
@@ -61,7 +157,9 @@ async function ensurePathExists(path: string) {
 async function downloadFile(url: string, destination: string) {
   const response = await fetch(url)
   if (!response.ok || !response.body) {
-    throw new Error(`download failed (${response.status}): ${response.statusText || 'unknown error'}`)
+    throw new Error(
+      `download failed (${response.status}): ${response.statusText || 'unknown error'}`
+    )
   }
 
   await pipeline(Readable.fromWeb(response.body), createWriteStream(destination))
@@ -70,21 +168,26 @@ async function downloadFile(url: string, destination: string) {
 async function ensureModelArtifactsDownloaded({
   model,
   notes,
+  env,
 }: {
   model: OnnxModelId
   notes: string[]
+  env: Env
 }): Promise<ModelArtifacts> {
-  const cacheDir = resolveCacheDir()
+  const cacheDir = resolveCacheDir(env)
   const modelDir = join(cacheDir, model)
   await ensurePathExists(modelDir)
 
   const source = MODEL_SOURCES[model]
-  const mirrorOverride = process.env.SUMMARIZE_ONNX_MODEL_BASE_URL?.trim()?.replace(/\/$/, '') || null
+  const mirrorOverride = env.SUMMARIZE_ONNX_MODEL_BASE_URL?.trim()?.replace(/\/$/, '') || null
 
   let downloaded = false
   for (const file of source.files) {
     const targetPath = join(modelDir, file.path)
-    const exists = await fs.stat(targetPath).then(() => true).catch(() => false)
+    const exists = await fs
+      .stat(targetPath)
+      .then(() => true)
+      .catch(() => false)
     if (exists) continue
 
     const baseUrl = mirrorOverride || `https://huggingface.co/${source.repo}/resolve/main`
@@ -102,29 +205,6 @@ async function ensureModelArtifactsDownloaded({
     modelPath: join(modelDir, 'model.onnx'),
     vocabPath: join(modelDir, 'vocab.txt'),
   }
-}
-
-function buildCommand(commandTemplate: string, inputPath: string, artifacts: ModelArtifacts): string {
-  const inputPlaceholderPresent = commandTemplate.includes('{input}')
-  const replacements: Record<string, string> = {
-    '{input}': inputPath,
-    '{model_dir}': artifacts.modelDir,
-    '{model}': artifacts.modelPath,
-    '{vocab}': artifacts.vocabPath,
-  }
-
-  let command = commandTemplate
-  for (const [needle, replacement] of Object.entries(replacements)) {
-    if (command.includes(needle)) {
-      command = command.replaceAll(needle, replacement)
-    }
-  }
-
-  if (!inputPlaceholderPresent) {
-    command = `${command} ${inputPath}`
-  }
-
-  return command
 }
 
 async function ensureWavInput({
@@ -172,6 +252,7 @@ export async function transcribeWithOnnxCli({
   filename,
   totalDurationSeconds = null,
   onProgress = null,
+  env = process.env,
 }: {
   model: OnnxModelId
   bytes: Uint8Array
@@ -179,13 +260,12 @@ export async function transcribeWithOnnxCli({
   filename: string | null
   totalDurationSeconds?: number | null
   onProgress?: ((event: WhisperProgressEvent) => void) | null
+  env?: Env
 }): Promise<WhisperTranscriptionResult> {
-  const tempFile = join(
-    tmpdir(),
-    `summarize-onnx-${randomUUID()}-${filename?.trim() || 'media'}${
-      extname(filename ?? '') || '.bin'
-    }`
-  )
+  const nameHint = filename?.trim() || 'media'
+  const baseName = basename(nameHint).replaceAll('/', '_').replaceAll('\\', '_').trim() || 'media'
+  const safeName = extname(baseName) ? baseName : `${baseName}${extname(nameHint) || '.bin'}`
+  const tempFile = join(tmpdir(), `summarize-onnx-${randomUUID()}-${safeName}`)
   try {
     await fs.writeFile(tempFile, bytes)
     return transcribeWithOnnxCliFile({
@@ -194,6 +274,7 @@ export async function transcribeWithOnnxCli({
       mediaType,
       totalDurationSeconds,
       onProgress,
+      env,
     })
   } finally {
     await fs.unlink(tempFile).catch(() => {})
@@ -206,15 +287,17 @@ export async function transcribeWithOnnxCliFile({
   mediaType,
   totalDurationSeconds = null,
   onProgress = null,
+  env = process.env,
 }: {
   model: OnnxModelId
   filePath: string
   mediaType: string
   totalDurationSeconds?: number | null
   onProgress?: ((event: WhisperProgressEvent) => void) | null
+  env?: Env
 }): Promise<WhisperTranscriptionResult> {
   const notes: string[] = []
-  const commandTemplate = resolveOnnxCommand(model)
+  const commandTemplate = resolveOnnxCommand(model, env)
   const provider = resolveOnnxProviderId(model)
 
   if (!commandTemplate) {
@@ -230,7 +313,7 @@ export async function transcribeWithOnnxCliFile({
 
   let artifacts: ModelArtifacts
   try {
-    artifacts = await ensureModelArtifactsDownloaded({ model, notes })
+    artifacts = await ensureModelArtifactsDownloaded({ model, notes, env })
   } catch (error) {
     return {
       text: null,
@@ -241,7 +324,23 @@ export async function transcribeWithOnnxCliFile({
   }
 
   const wavInput = await ensureWavInput({ filePath, mediaType, notes })
-  const command = buildCommand(commandTemplate, wavInput.path, artifacts)
+  const template = parseCommandTemplate(commandTemplate)
+  const argvCommand =
+    template.kind === 'argv'
+      ? buildArgvCommand({
+          argvTemplate: template.argvTemplate,
+          inputPath: wavInput.path,
+          artifacts,
+        })
+      : null
+  const shellCommand =
+    template.kind === 'shell'
+      ? buildShellCommand({
+          commandTemplate: template.commandTemplate,
+          inputPath: wavInput.path,
+          artifacts,
+        })
+      : null
 
   return new Promise<WhisperTranscriptionResult>((resolve) => {
     onProgress?.({
@@ -251,7 +350,9 @@ export async function transcribeWithOnnxCliFile({
       totalDurationSeconds,
     })
 
-    const proc = spawn(command, { shell: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    const proc = argvCommand
+      ? spawn(argvCommand.command, argvCommand.args, { stdio: ['ignore', 'pipe', 'pipe'] })
+      : spawn(shellCommand as string, { shell: true, stdio: ['ignore', 'pipe', 'pipe'] })
     let stdout = ''
     let stderr = ''
     proc.stdout?.setEncoding('utf8')
@@ -270,31 +371,35 @@ export async function transcribeWithOnnxCliFile({
       }
       resolve({ text: null, provider, error: wrapError(`${provider} failed`, error), notes })
     })
-    proc.on('close', async (code) => {
-      if (wavInput.cleanup) await wavInput.cleanup()
+    proc.on('close', (code) => {
+      void (async () => {
+        if (wavInput.cleanup) await wavInput.cleanup()
 
-      if (code !== 0) {
-        resolve({
-          text: null,
-          provider,
-          error: new Error(`${provider} failed (${code ?? 'unknown'}): ${stderr.trim() || 'unknown error'}`),
-          notes,
-        })
-        return
-      }
+        if (code !== 0) {
+          resolve({
+            text: null,
+            provider,
+            error: new Error(
+              `${provider} failed (${code ?? 'unknown'}): ${stderr.trim() || 'unknown error'}`
+            ),
+            notes,
+          })
+          return
+        }
 
-      const trimmed = stdout.trim()
-      if (!trimmed) {
-        resolve({
-          text: null,
-          provider,
-          error: new Error(`${provider} returned empty text`),
-          notes,
-        })
-        return
-      }
+        const trimmed = stdout.trim()
+        if (!trimmed) {
+          resolve({
+            text: null,
+            provider,
+            error: new Error(`${provider} returned empty text`),
+            notes,
+          })
+          return
+        }
 
-      resolve({ text: trimmed, provider, error: null, notes })
+        resolve({ text: trimmed, provider, error: null, notes })
+      })()
     })
   })
 }

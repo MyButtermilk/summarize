@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
-import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { transcribeWithOnnxCliFile } from '../packages/core/src/transcription/onnx-cli.js'
 
@@ -20,10 +20,7 @@ describe('onnx cli transcriber', () => {
     process.env.SUMMARIZE_ONNX_PARAKEET_CMD =
       "cat {model} {vocab} {input} >/dev/null; printf 'downloaded'"
 
-    const responses = [
-      new Response('dummy-model'),
-      new Response('dummy-vocab'),
-    ]
+    const responses = [new Response('dummy-model'), new Response('dummy-vocab')]
     const fetchMock = vi
       .spyOn(global, 'fetch')
       .mockImplementation(async () => responses.shift() ?? new Response('', { status: 404 }))
@@ -73,6 +70,38 @@ describe('onnx cli transcriber', () => {
 
     expect(result.provider).toBe('onnx-parakeet')
     expect(result.text).toBe('hello world')
+    expect(result.error).toBeNull()
+  })
+
+  it('supports argv-style JSON command templates (no shell) and handles spaces in paths', async () => {
+    const filePath = join(tmpdir(), `onnx ${randomUUID()}.wav`)
+    await fs.writeFile(filePath, 'dummy')
+
+    const cacheDir = join(tmpdir(), `onnx-cache-${randomUUID()}`)
+    process.env.SUMMARIZE_ONNX_CACHE_DIR = cacheDir
+    process.env.SUMMARIZE_ONNX_MODEL_BASE_URL = 'https://example.invalid/model'
+
+    vi.spyOn(global, 'fetch').mockImplementation(async () => new Response('noop'))
+
+    process.env.SUMMARIZE_ONNX_PARAKEET_CMD = JSON.stringify([
+      'node',
+      '-e',
+      "process.stdout.write(process.argv[1] ?? '')",
+      '{input}',
+    ])
+
+    const result = await transcribeWithOnnxCliFile({
+      model: 'parakeet',
+      filePath,
+      mediaType: 'audio/wav',
+      totalDurationSeconds: null,
+      onProgress: null,
+    })
+
+    await fs.rm(cacheDir, { recursive: true, force: true })
+    await fs.unlink(filePath)
+
+    expect(result.text).toBe(filePath)
     expect(result.error).toBeNull()
   })
 

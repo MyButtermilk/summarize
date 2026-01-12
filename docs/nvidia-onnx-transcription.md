@@ -1,3 +1,9 @@
+---
+summary: "Local Parakeet/Canary ONNX transcription via external CLI."
+read_when:
+  - "When configuring or changing local ONNX transcription (parakeet/canary)."
+---
+
 # NVIDIA Parakeet/Canary ONNX transcription
 
 Summarize can now run local transcription through NVIDIA's Parakeet-TDT 0.6B-v3 or Canary 1B-v2 ONNX exports by shelling out to a user-provided CLI. The default remains Whisper/whisper.cpp; ONNX only runs when explicitly selected.
@@ -7,8 +13,14 @@ Summarize can now run local transcription through NVIDIA's Parakeet-TDT 0.6B-v3 
 1) Choose a CLI capable of running the ONNX models (e.g. `sherpa-onnx` or a custom wrapper) and make sure it emits the transcribed text on stdout. The CLI must accept a single WAV input path. **Summarize now downloads the Hugging Face model files automatically on first use** into the cache (see below), so your command template can reference the provided paths.
 2) Set one (or both) command templates:
 
-- `SUMMARIZE_ONNX_PARAKEET_CMD="sherpa-onnx ... --tokens {vocab} --offline-ctc-model {model} --input-wav {input}"`
-- `SUMMARIZE_ONNX_CANARY_CMD="... {model_dir} ... {input}"`
+- Recommended (no shell): provide a JSON array (command + args):
+  - `SUMMARIZE_ONNX_PARAKEET_CMD='["sherpa-onnx", "...", "--tokens", "{vocab}", "--offline-ctc-model", "{model}", "--input-wav", "{input}"]'`
+  - `SUMMARIZE_ONNX_CANARY_CMD='["my-canary-wrapper", "{model_dir}", "{input}"]'`
+- Shell string (advanced): `SUMMARIZE_ONNX_PARAKEET_CMD="sherpa-onnx ... --tokens {vocab} --offline-ctc-model {model} --input-wav {input}"`
+
+Notes:
+
+- If you use the shell string form, **do not quote placeholders** (Summarize shell-escapes substituted paths so spaces work and injection risk is reduced).
 
 Placeholders:
 

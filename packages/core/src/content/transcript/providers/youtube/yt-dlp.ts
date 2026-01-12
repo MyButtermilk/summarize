@@ -3,13 +3,13 @@ import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { resolveOnnxCommand } from '../../../../transcription/onnx-cli.js'
 import {
   isWhisperCppReady,
   probeMediaDurationSecondsWithFfprobe,
   type TranscriptionProvider,
   transcribeMediaFileWithWhisper,
 } from '../../../../transcription/whisper.js'
-import { resolveOnnxCommand } from '../../../../transcription/onnx-cli.js'
 import type { LinkPreviewProgressEvent } from '../../../link-preview/deps.js'
 import { ProgressKind } from '../../../link-preview/deps.js'
 
@@ -25,6 +25,7 @@ type YtDlpTranscriptResult = {
 
 type YtDlpRequest = {
   ytDlpPath: string | null
+  env?: Record<string, string | undefined>
   openaiApiKey: string | null
   falApiKey: string | null
   url: string
@@ -40,6 +41,7 @@ type YtDlpDurationRequest = {
 
 export const fetchTranscriptWithYtDlp = async ({
   ytDlpPath,
+  env,
   openaiApiKey,
   falApiKey,
   url,
@@ -70,9 +72,11 @@ export const fetchTranscriptWithYtDlp = async ({
   }
 
   const progress = typeof onProgress === 'function' ? onProgress : null
-  const preferredTranscriber = process.env.SUMMARIZE_TRANSCRIBER?.trim().toLowerCase()
+  const effectiveEnv = env ?? process.env
+  const preferredTranscriber = effectiveEnv.SUMMARIZE_TRANSCRIBER?.trim().toLowerCase()
   const wantsOnnx = preferredTranscriber === 'parakeet' || preferredTranscriber === 'canary'
-  const onnxReady = wantsOnnx && resolveOnnxCommand(preferredTranscriber as 'parakeet' | 'canary')
+  const onnxReady =
+    wantsOnnx && resolveOnnxCommand(preferredTranscriber as 'parakeet' | 'canary', effectiveEnv)
   const providerHint: 'cpp' | 'onnx' | 'openai' | 'fal' | 'openai->fal' | 'unknown' = onnxReady
     ? 'onnx'
     : hasLocalWhisper
@@ -146,6 +150,7 @@ export const fetchTranscriptWithYtDlp = async ({
       openaiApiKey,
       falApiKey,
       totalDurationSeconds: probedDurationSeconds,
+      env: effectiveEnv,
       onProgress: (event) => {
         progress?.({
           kind: ProgressKind.TranscriptWhisperProgress,

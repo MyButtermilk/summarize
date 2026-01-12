@@ -16,9 +16,7 @@ export function buildProgram() {
       new Option(
         '--transcriber <name>',
         'Audio transcription backend: whisper (default), parakeet, canary'
-      )
-        .choices(['whisper', 'parakeet', 'canary'])
-        .default('whisper')
+      ).choices(['whisper', 'parakeet', 'canary'])
     )
     .addOption(
       new Option(

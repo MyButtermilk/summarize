@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { resolveOnnxCommand } from '../../../../transcription/onnx-cli.js'
 import {
   isFfmpegAvailable,
   isWhisperCppReady,
@@ -11,7 +12,6 @@ import {
   transcribeMediaFileWithWhisper,
   transcribeMediaWithWhisper,
 } from '../../../../transcription/whisper.js'
-import { resolveOnnxCommand } from '../../../../transcription/onnx-cli.js'
 import type { ProviderFetchOptions } from '../../types.js'
 import { MAX_REMOTE_MEDIA_BYTES, TRANSCRIPTION_TIMEOUT_MS } from './constants.js'
 
@@ -29,6 +29,7 @@ export type TranscriptionResult = {
 
 export async function transcribeMediaUrl({
   fetchImpl,
+  env,
   url,
   filenameHint,
   durationSecondsHint,
@@ -38,6 +39,7 @@ export async function transcribeMediaUrl({
   progress,
 }: {
   fetchImpl: typeof fetch
+  env?: Record<string, string | undefined>
   url: string
   filenameHint: string
   durationSecondsHint: number | null
@@ -51,9 +53,11 @@ export async function transcribeMediaUrl({
   } | null
 }): Promise<TranscriptionResult> {
   const canChunk = await isFfmpegAvailable()
-  const preferredTranscriber = process.env.SUMMARIZE_TRANSCRIBER?.trim().toLowerCase()
+  const effectiveEnv = env ?? process.env
+  const preferredTranscriber = effectiveEnv.SUMMARIZE_TRANSCRIBER?.trim().toLowerCase()
   const wantsOnnx = preferredTranscriber === 'parakeet' || preferredTranscriber === 'canary'
-  const onnxReady = wantsOnnx && resolveOnnxCommand(preferredTranscriber as 'parakeet' | 'canary')
+  const onnxReady =
+    wantsOnnx && resolveOnnxCommand(preferredTranscriber as 'parakeet' | 'canary', effectiveEnv)
   const providerHint: 'cpp' | 'onnx' | 'openai' | 'fal' | 'openai->fal' | 'unknown' = onnxReady
     ? 'onnx'
     : (await isWhisperCppReady())
@@ -131,6 +135,7 @@ export async function transcribeMediaUrl({
       openaiApiKey,
       falApiKey,
       totalDurationSeconds: durationSecondsHint,
+      env: effectiveEnv,
       onProgress: (event) => {
         progress?.onProgress?.({
           kind: 'transcript-whisper-progress',
@@ -182,6 +187,7 @@ export async function transcribeMediaUrl({
       openaiApiKey,
       falApiKey,
       totalDurationSeconds: durationSecondsHint,
+      env: effectiveEnv,
       onProgress: (event) => {
         progress?.onProgress?.({
           kind: 'transcript-whisper-progress',
@@ -237,6 +243,7 @@ export async function transcribeMediaUrl({
       openaiApiKey,
       falApiKey,
       totalDurationSeconds: probedDurationSeconds,
+      env: effectiveEnv,
       onProgress: (event) => {
         progress?.onProgress?.({
           kind: 'transcript-whisper-progress',
